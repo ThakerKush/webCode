@@ -1,0 +1,59 @@
+version: "3.8"
+
+networks:
+  web:
+    driver: bridge
+  internal:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: clonchat-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - internal
+    labels:
+      - "traefik.enable=false"
+  traefik:
+    image: traefik:v3.4
+    command:
+      # Enable Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=web"
+
+      # Entry points
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      # Dashboard (remove in production)
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+
+      # Auto HTTPS (optional)
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=your-email@domain.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - traefik-ssl-certs:/letsencrypt
+    networks:
+      - web
+volumes:
+  postgres_data: # Database data survives container restarts
+  traefik-ssl-certs: # SSL certificates survive Traefik restarts

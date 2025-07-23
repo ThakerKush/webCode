@@ -1,0 +1,46 @@
+# Use Node.js Alpine as base image
+FROM node:20-alpine
+
+# Install system dependencies and development tools
+RUN apk update && apk add --no-cache \
+    git \
+    curl \
+    wget \
+    bash \
+    grep \
+    build-base \
+    openssh-client
+
+# Set working directory
+WORKDIR /workspace
+
+# Install global Node.js tools
+RUN npm install -g \
+    typescript \
+    @typescript-eslint/eslint-plugin \
+    @typescript-eslint/parser \
+    eslint \
+    prettier \
+    nodemon \
+    vite@latest 
+# Install language servers for coding assistance
+RUN npm install -g \
+    typescript-language-server \
+    vscode-langservers-extracted \
+    @vue/language-server
+
+
+
+# Create a non-root user for security
+RUN adduser -D -s /bin/bash coder
+RUN chown -R coder:coder /workspace
+
+# Switch to non-root user
+USER coder
+
+# Set environment variables
+ENV NODE_ENV=development
+ENV SHELL=/bin/bash
+
+# Expose common development ports
+EXPOSE 3000 5173 8080
