@@ -7,6 +7,9 @@ import { handleStream } from "../utils/handleStream.js";
 import { logger } from "../utils/log.js";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { Readable } from "stream";
+import { createGzip } from "zlib";
+import type { DbService } from "./db.js";
 
 export type WorkspaceInfo = {
   containerId: string;
@@ -30,10 +33,11 @@ export type ShellSession = {
 
 export class DockerService {
   private log = logger.child({ service: "docker" });
-
+  private db: DbService;
   docker: Docker;
 
-  constructor() {
+  constructor(db: DbService) {
+    this.db = db;
     // Dockerode auto-detects the socket path and API version
     this.docker = new Docker();
   }
@@ -188,10 +192,9 @@ export class DockerService {
       } catch (err) {
         const createResult = await this.makeContaier(imageName, projectId);
         if (!createResult.ok) {
-          this.log.error(
-            { child: "getOrCreateWorkspace" },
-            String(createResult.error)
-          );
+          this.log.error(String(createResult.error), {
+            child: "getOrCreateWorkspace",
+          });
           return Err(createResult.error);
         }
         return createResult;
@@ -271,6 +274,64 @@ export class DockerService {
       return Ok(shellSession);
     } catch (error) {
       return Err(new DockerError("startShellSession", JSON.stringify(error)));
+    }
+  }
+  async exportContainer(
+    projectId: string
+  ): Promise<Result<Readable, DockerError>> {
+    try {
+      this.log.info(
+        { child: "exportContainerStream" },
+        `Exporting container ${projectId} as stream`
+      );
+
+      const container = this.docker.getContainer(projectId);
+      const commitResult = await container.commit({
+        repo: `archived-${projectId}`,
+        tag: "latest",
+      });
+
+      const image = this.docker.getImage(commitResult.Id);
+      const exportStream = await image.get();
+
+      // Create gzip compression stream
+      const gzipStream = createGzip();
+
+      // Return compressed stream (memory efficient)
+      const compressedStream = exportStream.pipe(gzipStream);
+      //cleanup after the stream is read
+      compressedStream.on("end", async () => {
+        try {
+          await image.remove({ force: true });
+        } catch (cleanupError) {
+          this.log.warn(
+            { error: cleanupError },
+            `Failed to cleanup image ${commitResult.Id}`
+          );
+        }
+      });
+
+      return Ok(compressedStream);
+    } catch (error) {
+      return Err(DockerError.containerError(`Export failed ${error}`));
+    }
+  }
+
+  async stopAndRemoveContainer(
+    projectId: string
+  ): Promise<Result<void, DockerError>> {
+    try {
+      const container = this.docker.getContainer(projectId);
+      await container.stop({ t: 10 });
+      await container.remove({ force: true });
+
+      this.log.info(
+        { child: "stopAndRemoveContainer" },
+        `Container ${projectId} stopped and removed`
+      );
+      return Ok(undefined);
+    } catch (error) {
+      return Err(DockerError.containerError(`Stop and remove failed ${error}`));
     }
   }
 }

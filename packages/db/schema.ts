@@ -104,6 +104,10 @@ export const project = pgTable("projects", {
     .references(() => user.id),
   uuid: uuid("uuid").notNull(),
   storageLink: text("storageLink"),
+  lastHeartbeat: timestamp("last_heartbeat").defaultNow(),
+  workspaceStatus: varchar("workspace_status", {
+    enum: ["inactive", "active", "archiving"],
+  }).default("inactive"),
   createdAt: timestamp("createdAt").notNull(),
   updatedAt: timestamp("updatedAt").notNull(),
 });

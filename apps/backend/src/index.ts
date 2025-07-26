@@ -29,14 +29,39 @@ import { Readable } from "stream";
 import { stream } from "hono/streaming";
 import { fin } from "./tool/serve.js";
 import { logger } from "./utils/log.js";
+import { S3Service } from "./services/s3.js";
+import { WorkspaceManager } from "./services/workspaceManager.js";
 const server = new Hono();
 
 // TODO: make this into a server service
 // only export app after it is initialized
 const app = new App();
 await app.initialize();
-app.service("docker", (): DockerService => new DockerService());
+app.service("docker", async (): Promise<DockerService> => {
+  const db = await app.getDb();
+  return new DockerService(db);
+});
 app.service("db", (): DbService => new DbService());
+app.service("s3", async (): Promise<S3Service> => {
+  const s3 = new S3Service();
+  const result = await s3.initialize();
+  if (!result.ok) {
+    throw new Error(result.error.message);
+  }
+  return s3;
+});
+app.service("workspaceManager", async (): Promise<WorkspaceManager> => {
+  const db = await app.getDb();
+  const s3 = await app.getS3();
+  const docker = await app.getDocker();
+  return new WorkspaceManager(docker, s3, db);
+});
+//This is how you should start the worksapceManager
+// app.service("s3", async (): Promise<S3Service> => {
+//   const db = await app.getDb();
+//   const s3 = await app.getS3();
+//   return new S3Service(db);
+// });
 export { app };
 
 const imageName = "code-workspace:latest";
@@ -191,6 +216,44 @@ server
           error: error,
         });
       }
+    }
+  )
+  .post(
+    "/workspace/test",
+    zValidator(
+      "json",
+      z.object({ userId: z.number(), containerId: z.string() })
+    ),
+    async (c) => {
+      const { userId, containerId } = c.req.valid("json");
+      const docker = await app.getDocker();
+      logger.info({ child: "test" }, "request received");
+      // first create that workspace
+      const projectId = uuidv4();
+      const db = await app.getDb();
+      const projectResult = await db.createProject(projectId, userId, 1);
+      if (!projectResult.ok) {
+        console.log(projectResult.error);
+        logger.error(
+          {
+            error: projectResult.error,
+            test: "do you work",
+          },
+          "project creation failed"
+        );
+        return c.body("project creation failed");
+      }
+      const container = await docker.getOrCreateWorkspace(
+        projectId,
+        userId,
+        "code-workspace:latestV2"
+      );
+      logger.info({ child: "test" }, "project created");
+      const workspaceManager = await app.getWorkspaceManager();
+      logger.info({ child: "test" }, "workspace manager created");
+      await workspaceManager.archiveWorkspace(projectId);
+      logger.info({ child: "test" }, "workspace archived");
+      return c.body("success");
     }
   );
 

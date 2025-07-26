@@ -8,6 +8,13 @@
       "when": 1752672726704,
       "tag": "0000_dashing_forge",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1753456198039,
+      "tag": "0001_bouncy_captain_cross",
+      "breakpoints": true
     }
   ]
 }

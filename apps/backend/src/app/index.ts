@@ -2,6 +2,8 @@ import type z from "zod";
 import { logger } from "../utils/log.js";
 import { DockerService } from "../services/docker.js";
 import type { DbService } from "../services/db.js";
+import type { S3Service } from "../services/s3.js";
+import type { WorkspaceManager } from "../services/workspaceManager.js";
 
 type ServiceFactory<T> = () => T | Promise<T>;
 type ServiceShutdown<T> = (state: Awaited<T>) => Promise<void>;
@@ -75,5 +77,14 @@ export class App {
   public async getDb(): Promise<DbService> {
     const db = await this.getService<DbService>("db");
     return db;
+  }
+  public async getS3(): Promise<S3Service> {
+    const s3 = await this.getService<S3Service>("s3");
+    return s3;
+  }
+  public async getWorkspaceManager(): Promise<WorkspaceManager> {
+    const workspaceManager =
+      await this.getService<WorkspaceManager>("workspaceManager");
+    return workspaceManager;
   }
 }

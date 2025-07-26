@@ -12,6 +12,13 @@ declare global {
       POSTGRES_PORT: string;
       POSTGRES_DB: string;
       POSTGRES_HOST: string;
+
+      S3_ENDPOINT: string;
+      S3_REGION: string;
+      S3_ACCESS_KEY: string;
+      S3_SECRET_KEY: string;
+      S3_BUCKET_NAME: string;
+      S3_FORCE_PATH_STYLE: string;
     }
   }
 }
@@ -27,5 +34,13 @@ export default {
     POSTGRES_PORT: process.env.POSTGRES_PORT,
     POSTGRES_DB: process.env.POSTGRES_DB,
     POSTGRES_HOST: process.env.POSTGRES_HOST,
+  },
+  s3: {
+    endpoint: process.env.S3_ENDPOINT,
+    region: process.env.S3_REGION,
+    accessKeyId: process.env.S3_ACCESS_KEY,
+    secretAccessKey: process.env.S3_SECRET_KEY,
+    bucketName: process.env.S3_BUCKET_NAME,
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
   },
 };

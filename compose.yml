@@ -23,6 +23,29 @@ services:
       - internal
     labels:
       - "traefik.enable=false"
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: coding-agent-localstack
+    environment:
+      SERVICES: s3
+      DEBUG: 1
+      DATA_DIR: /tmp/localstack/data
+      PERSISTENCE: 1 # Data survives restarts
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack # Mount to different path
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - internal
+      - web
+    labels:
+      - "traefik.enable=false"
+
   traefik:
     image: traefik:v3.4
     command:
@@ -57,3 +80,4 @@ services:
 volumes:
   postgres_data: # Database data survives container restarts
   traefik-ssl-certs: # SSL certificates survive Traefik restarts
+  localstack_data:

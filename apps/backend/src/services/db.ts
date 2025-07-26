@@ -3,7 +3,7 @@ import { BaseError } from "../errors/baseError.js";
 import { logger } from "../utils/log.js";
 import postgres, { type Sql } from "postgres";
 import { drizzle, PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import * as schema from "@repo/db/schema";
 import { Err, Ok, type Result } from "../errors/result.js";
 
@@ -157,6 +157,117 @@ export class DbService {
     } catch (error) {
       this.log.error("Failed to create project", { error });
       return Err(DbError.queryFailed("createProject", error));
+    }
+  }
+  async updateWorkspaceActivity(
+    projectId: string,
+    userId: number,
+    activity: "active" | "inactive" | "archiving"
+  ) {
+    const result = await this.db
+      .select()
+      .from(schema.project)
+      .where(
+        and(
+          eq(schema.project.uuid, projectId),
+          eq(schema.project.userId, userId)
+        )
+      );
+    if (result.length === 0) {
+      return Err(DbError.notFound("project", `projectId: ${projectId}`));
+    }
+    const project = result[0];
+    const updatedProject = await this.db
+      .update(schema.project)
+      .set({
+        lastHeartbeat: new Date(),
+        workspaceStatus: activity,
+      })
+      .where(eq(schema.project.id, project.id));
+    return Ok(updatedProject);
+  }
+  async updateHeartbeat(projectId: string): Promise<Result<void, DbError>> {
+    const result = await this.db
+      .update(schema.project)
+      .set({ lastHeartbeat: new Date() })
+      .where(eq(schema.project.uuid, projectId));
+    if (result.length === 0) {
+      return Err(DbError.notFound("project", `projectId: ${projectId}`));
+    }
+    return Ok(undefined);
+  }
+  async getStaleWorkspaces(
+    heartbeatTimeout: number
+  ): Promise<Result<schema.Project[], DbError>> {
+    const cutoff = new Date(Date.now() - heartbeatTimeout);
+    const result = await this.db
+      .select()
+      .from(schema.project)
+      .where(
+        and(
+          eq(schema.project.workspaceStatus, "active"),
+          lt(schema.project.lastHeartbeat, cutoff)
+        )
+      );
+    return Ok(result);
+  }
+  async markWorkspaceArchiving(
+    projectId: string
+  ): Promise<Result<void, DbError>> {
+    const result = await this.db
+      .update(schema.project)
+      .set({ workspaceStatus: "archiving" })
+      .where(eq(schema.project.uuid, projectId));
+    if (result.length === 0) {
+      return Err(DbError.notFound("project", `projectId: ${projectId}`));
+    }
+    return Ok(undefined);
+  }
+
+  async markWorkspaceInactive(
+    projectId: string
+  ): Promise<Result<void, DbError>> {
+    const result = await this.db
+      .update(schema.project)
+      .set({
+        workspaceStatus: "inactive",
+      })
+      .where(eq(schema.project.uuid, projectId));
+    if (result.length === 0) {
+      return Err(DbError.notFound("project", `projectId: ${projectId}`));
+    }
+    return Ok(undefined);
+  }
+  async markWorkspaceActive(projectId: string): Promise<Result<void, DbError>> {
+    try {
+      const result = await this.db
+        .update(schema.project)
+        .set({ workspaceStatus: "active" })
+        .where(eq(schema.project.uuid, projectId));
+      if (result.length === 0) {
+        return Err(DbError.notFound("project", `projectId: ${projectId}`));
+      }
+      return Ok(undefined);
+    } catch (error) {
+      return Err(DbError.queryFailed("markWorkspaceActive", error));
+    }
+  }
+
+  async updateProjectStorageLink(
+    projectId: string,
+    storageLink: string
+  ): Promise<Result<void, DbError>> {
+    try {
+      const result = await this.db
+        .update(schema.project)
+        .set({ storageLink })
+        .where(eq(schema.project.uuid, projectId));
+      if (result.length === 0) {
+        return Err(DbError.notFound("project", `projectId: ${projectId}`));
+      }
+      return Ok(undefined);
+    } catch (error) {
+      return Err(DbError.queryFailed("updateProjectStorageLink", error));
     }
   }
 }
