@@ -17,13 +17,18 @@ declare global {
       S3_REGION: string;
       S3_ACCESS_KEY: string;
       S3_SECRET_KEY: string;
-      S3_BUCKET_NAME: string;
+      S3_BUCKET: string;
       S3_FORCE_PATH_STYLE: string;
+
+      NAME: string;
+      PORT: string;
     }
   }
 }
 
 export default {
+  name: process.env.NAME,
+  port: process.env.PORT || 3001,
   ai: {
     open_router_api_key: process.env.open_router_api_key,
     google_api_key: process.env.google_api_key,
@@ -40,7 +45,7 @@ export default {
     region: process.env.S3_REGION,
     accessKeyId: process.env.S3_ACCESS_KEY,
     secretAccessKey: process.env.S3_SECRET_KEY,
-    bucketName: process.env.S3_BUCKET_NAME,
+    bucketName: process.env.S3_BUCKET,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
   },
 };

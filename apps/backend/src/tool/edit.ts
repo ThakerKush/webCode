@@ -1,11 +1,10 @@
 import { tool, type Tool } from "ai";
 import z from "zod";
 import { sessionContext } from "../session/sessionContext.js";
-import { app } from "../index.js";
 import { createTwoFilesPatch } from "diff";
 import { file } from "zod/v4";
 import { logger } from "../utils/log.js";
-
+import { dockerService } from "../services/docker.js";
 export const edit: Tool = tool({
   description: "Edit a file",
   inputSchema: z.object({
@@ -21,12 +20,11 @@ export const edit: Tool = tool({
   execute: async ({ path, oldContent, newContent, replaceAll }) => {
     try {
       logger.info({ child: "edit tool" }, `Agent is editing file ${path}`);
-      const docker = await app.getDocker();
       const workspace = sessionContext.getContext();
       if (!workspace) {
         throw Error("Workspace Info not configured");
       }
-      const readResult = await docker.executeCommand(
+      const readResult = await dockerService.executeCommand(
         workspace.workspaceInfo.containerId,
         [`cat ${path}`]
       );
@@ -44,7 +42,7 @@ export const edit: Tool = tool({
         replaceAll
       );
       // Write the result back to the file
-      const writeResult = await docker.executeCommand(
+      const writeResult = await dockerService.executeCommand(
         workspace.workspaceInfo.containerId,
         ["sh", "-c", `cat > ${path} << 'EOF'\n${replacedContent}\nEOF`]
       );

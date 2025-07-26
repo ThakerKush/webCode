@@ -19,8 +19,8 @@ export class DockerError extends BaseError {
     return new DockerError("build", message, { logs }, "docker-service");
   }
 
-  public static containerError(message: string): DockerError {
-    return new DockerError("container_create", message);
+  public static containerError(message: string, error?: unknown): DockerError {
+    return new DockerError("container_create", message, { error });
   }
 
   public static workspaceExists(name: string): DockerError {

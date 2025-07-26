@@ -1,8 +1,8 @@
 import { tool, type Tool } from "ai";
 import z from "zod";
 import { sessionContext } from "../session/sessionContext.js";
-import { app } from "../index.js";
 import { logger } from "../utils/log.js";
+import { dockerService } from "../services/docker.js";
 
 export const read: Tool = tool({
   description: "Read a file",
@@ -11,12 +11,11 @@ export const read: Tool = tool({
   }),
   execute: async ({ path }) => {
     logger.info({ child: "read tool" }, `Agent is reading file ${path}`);
-    const docker = await app.getDocker();
     const workspace = sessionContext.getContext();
     if (!workspace) {
       throw Error("Workspace Info not configured");
     }
-    const result = await docker.executeCommand(
+    const result = await dockerService.executeCommand(
       workspace.workspaceInfo.containerId,
       ["cat", path]
     );

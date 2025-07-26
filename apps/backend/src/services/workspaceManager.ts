@@ -1,7 +1,7 @@
 import { logger } from "../utils/log.js";
-import type { DockerService } from "./docker.js";
-import type { S3Service } from "./s3.js";
-import type { DbService } from "./db.js";
+import { dockerService } from "./docker.js";
+import { s3Service } from "./s3.js";
+import { dbService } from "./db.js";
 import { BaseError } from "../errors/baseError.js";
 import { Err, Ok, type Result } from "../errors/result.js";
 
@@ -19,43 +19,23 @@ export class WorkspaceManagerError extends BaseError {
   }
 }
 
-export class WorkspaceManager {
-  private log = logger.child({ service: "workspace-manager" });
-  private heartbeatTimeout = 10 * 60 * 1000; // 10 minutes
-  private cleanupInterval: NodeJS.Timeout | null = null;
-  private dbService: DbService;
-  private dockerService: DockerService;
-  private s3Service: S3Service;
+const log = logger.child({ service: "workspace-manager" });
+const db = dbService;
+const docker = dockerService;
+const s3 = s3Service;
+const heartbeatTimeout = 10 * 60 * 1000; // 10 minutes
+let cleanupInterval: NodeJS.Timeout;
+export const setupWorkspaceManager = async () => {
+  log.info("Setting up workspace manager");
+  workspaceManager.startCleanupJob();
+  log.info("Workspace manager setup complete");
+};
 
-  constructor(
-    dockerService: DockerService,
-    s3Service: S3Service,
-    dbService: DbService
-  ) {
-    this.dockerService = dockerService;
-    this.s3Service = s3Service;
-    this.dbService = dbService;
-  }
-  public initialize(): void {
-    this.log.info("Initializing WorkspaceManager with database backing");
-    this.startCleanupJob();
-  }
-  public async registerWorkspace(
-    projectId: string,
-    containerId: string,
-    userId: number
-  ): Promise<void> {
-    await this.dbService.updateWorkspaceActivity(projectId, userId, "active");
-    this.log.info(
-      { service: "workspaceManager" },
-      `Registered workspace ${projectId}`
-    );
-  }
-
-  public async updateHeartbeat(
+export const workspaceManager = {
+  updateHeartbeat: async (
     projectId: string
-  ): Promise<Result<void, WorkspaceManagerError>> {
-    const result = await this.dbService.updateHeartbeat(projectId);
+  ): Promise<Result<void, WorkspaceManagerError>> => {
+    const result = await db.updateHeartbeat(projectId);
 
     if (!result.ok) {
       return Err(
@@ -67,42 +47,40 @@ export class WorkspaceManager {
     }
 
     return Ok(undefined);
-  }
+  },
 
-  private startCleanupJob(): void {
-    this.cleanupInterval = setInterval(() => {
-      this.performCleanup().catch((error) => {
-        this.log.error("Cleanup job failed:", error);
+  startCleanupJob: async (): Promise<void> => {
+    cleanupInterval = setInterval(() => {
+      workspaceManager.performCleanup().catch((error) => {
+        log.error("Cleanup job failed:", error);
       });
     }, 30 * 1000);
-  }
+  },
 
-  private async performCleanup(): Promise<void> {
-    const staleWorkspaces = await this.dbService.getStaleWorkspaces(
-      this.heartbeatTimeout
-    );
+  performCleanup: async (): Promise<void> => {
+    const staleWorkspaces = await db.getStaleWorkspaces(heartbeatTimeout);
 
     if (!staleWorkspaces.ok) {
-      this.log.error("Failed to get stale workspaces:", staleWorkspaces.error);
+      log.error(staleWorkspaces.error, "Failed to get stale workspaces:");
       return;
     }
 
     for (const workspace of staleWorkspaces.value) {
-      await this.archiveWorkspace(workspace.uuid);
+      await workspaceManager.archiveWorkspace(workspace.uuid);
     }
-  }
-  // public for test only
-  public async archiveWorkspace(projectId: string): Promise<void> {
+  },
+
+  archiveWorkspace: async (projectId: string): Promise<void> => {
     try {
-      await this.dbService.markWorkspaceArchiving(projectId);
+      await db.markWorkspaceActivity(projectId, "archiving");
 
       // Export → S3 → cleanup logic stays the same
-      const exportResult = await this.dockerService.exportContainer(projectId);
+      const exportResult = await docker.exportContainer(projectId);
       if (!exportResult.ok)
         throw new Error(`Export failed: ${exportResult.error.message}`);
 
       const s3Key = `workspaces/${projectId}/${Date.now()}.tar.gz`;
-      const uploadResult = await this.s3Service.uploadFile(
+      const uploadResult = await s3.uploadFile(
         s3Key,
         exportResult.value,
         "application/gzip"
@@ -110,17 +88,18 @@ export class WorkspaceManager {
       if (!uploadResult.ok)
         throw new Error(`Upload failed: ${uploadResult.error.message}`);
 
-      await this.dbService.updateProjectStorageLink(
-        projectId,
-        uploadResult.value.location
-      );
-      await this.dockerService.stopAndRemoveContainer(projectId);
-      await this.dbService.markWorkspaceInactive(projectId);
+      await docker.stopAndRemoveContainer(projectId);
+      await db.updateWorkspaceActivity(projectId, "inactive");
 
-      this.log.info(`Archived workspace ${projectId}`);
+      log.info(`Archived workspace ${projectId}`);
     } catch (error) {
-      this.log.error(error, `Archive failed for ${projectId}:`);
-      await this.dbService.markWorkspaceActive(projectId);
+      log.error(error, `Archive failed for ${projectId}:`);
+      await db.updateWorkspaceActivity(projectId, "active");
     }
-  }
-}
+  },
+  stopCleanupJob: async () => {
+    if (cleanupInterval) {
+      clearInterval(cleanupInterval);
+    }
+  },
+};

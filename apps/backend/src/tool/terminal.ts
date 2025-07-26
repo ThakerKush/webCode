@@ -1,7 +1,6 @@
 import { tool, type Tool } from "ai";
 import z from "zod";
 import { sessionContext } from "../session/sessionContext.js";
-import { app } from "../index.js";
 import { handleStream } from "../utils/handleStream.js";
 import { logger } from "../utils/log.js";
 
@@ -17,7 +16,6 @@ export const terminal: Tool = tool({
         { child: "terminal tool" },
         `Agent called terminal tool with ${command} command `
       );
-      const docker = await app.getDocker();
       const context = sessionContext.getContext();
       if (!context) {
         throw new Error("No context found");

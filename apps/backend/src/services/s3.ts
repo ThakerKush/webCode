@@ -5,6 +5,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  ListBucketsCommand,
 } from "@aws-sdk/client-s3";
 import { BaseError } from "../errors/baseError.js";
 import config from "../config/index.js";
@@ -81,117 +82,98 @@ export interface FileMetadata {
   contentType?: string;
 }
 
-export class S3Service {
-  private client: S3Client;
-  private bucketName: string;
-  private initialized: boolean = false;
+const log = logger.child({ service: "s3" });
+export let s3: S3Client;
 
-  constructor() {
-    this.client = new S3Client({
-      endpoint: config.s3.endpoint,
-      region: config.s3.region,
-      credentials: {
-        accessKeyId: config.s3.accessKeyId,
-        secretAccessKey: config.s3.secretAccessKey,
-      },
-      forcePathStyle: config.s3.forcePathStyle,
-    });
-
-    this.bucketName = config.s3.bucketName;
-  }
-  public async initialize(): Promise<Result<void, S3Error>> {
-    try {
-      logger.info({ service: "s3" }, "Initializing S3 service...");
-
-      await this.client.send(
-        new CreateBucketCommand({
-          Bucket: this.bucketName,
-        })
-      );
-
-      this.initialized = true;
-      logger.info(
-        { service: "s3" },
-        `S3 bucket '${this.bucketName}' created/verified`
-      );
-      return Ok(undefined);
-    } catch (error: any) {
-      if (
-        error.name === "BucketAlreadyOwnedByYou" ||
-        error.name === "BucketAlreadyExists"
-      ) {
-        this.initialized = true;
-        logger.info(
-          { service: "s3" },
-          `S3 bucket '${this.bucketName}' already exists`
-        );
-        return Ok(undefined);
-      }
-
-      logger.error(
-        { service: "s3", error },
-        "Failed to initialize S3 service:",
-        
-      );
-      return Err(S3Error.bucketCreationFailed(this.bucketName, error));
+const {
+  bucketName,
+  endpoint,
+  region,
+  accessKeyId,
+  secretAccessKey,
+  forcePathStyle,
+} = config.s3;
+export const setupS3 = async () => {
+  log.info({ bucketName, endpoint, region }, "Initializing S3 service...");
+  s3 = new S3Client({
+    endpoint: endpoint,
+    region: region,
+    credentials: {
+      accessKeyId: accessKeyId,
+      secretAccessKey: secretAccessKey,
+    },
+    forcePathStyle: forcePathStyle,
+  });
+  try {
+    await s3.send(
+      new CreateBucketCommand({
+        Bucket: bucketName,
+      })
+    );
+    log.info(`Created bucket: ${bucketName}`);
+  } catch (error: any) {
+    if (
+      error.name === "BucketAlreadyOwnedByYou" ||
+      error.name === "BucketAlreadyExists"
+    ) {
+      log.info(`Bucket already exists: ${bucketName}`);
+    } else {
+      log.error(error, "Failed to initialize S3 service");
+      throw error;
     }
   }
-  public async uploadFile(
+  log.info("S3 service initialized");
+};
+
+export const s3Service = {
+  uploadFile: async (
     key: string,
     body: Uint8Array | string | Readable,
     contentType?: string
-  ): Promise<Result<UploadResult, S3Error>> {
-    if (!this.initialized) {
-      return Err(S3Error.connectionFailed("S3 service not initialized"));
-    }
-
+  ): Promise<Result<UploadResult, S3Error>> => {
     try {
       logger.info({ service: "s3" }, `Uploading file: ${key}`);
 
       const command = new PutObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: bucketName,
         Key: key,
         Body: body,
         ContentType: contentType,
       });
 
-      const response = await this.client.send(command);
+      const response = await s3.send(command);
 
       const result: UploadResult = {
         key,
         etag: response.ETag || "",
-        location: `${config.s3.endpoint}/${this.bucketName}/${key}`,
+        location: `${endpoint}/${bucketName}/${key}`,
       };
 
-      logger.info({ service: "s3" }, `File uploaded successfully: ${key}`);
+      log.info(`File uploaded successfully: ${key}`);
       return Ok(result);
     } catch (error) {
-      logger.error({ service: "s3" }, `Upload failed for ${key}:`, error);
+      log.error(error, `Upload failed for ${key}:`);
       return Err(S3Error.uploadFailed(key, error));
     }
-  }
+  },
 
-  public async getFile(key: string): Promise<Result<Buffer, S3Error>> {
-    if (!this.initialized) {
-      return Err(S3Error.connectionFailed("S3 service not initialized"));
-    }
-
+  getFile: async (key: string): Promise<Result<Buffer, S3Error>> => {
     try {
-      logger.info({ service: "s3" }, `Getting file: ${key}`);
+      log.info(`Getting file: ${key}`);
 
       const command = new GetObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: bucketName,
         Key: key,
       });
 
-      const response = await this.client.send(command);
+      const response = await s3.send(command);
 
       if (!response.Body) {
         return Err(S3Error.notFound(key));
       }
 
       const buffer = Buffer.from(await response.Body.transformToByteArray());
-      logger.info({ service: "s3" }, `File retrieved successfully: ${key}`);
+      log.info(`File retrieved successfully: ${key}`);
       return Ok(buffer);
     } catch (error: any) {
       if (
@@ -201,47 +183,37 @@ export class S3Service {
         return Err(S3Error.notFound(key));
       }
 
-      logger.error({ service: "s3" }, `Download failed for ${key}:`, error);
+      log.error(error, `Download failed for ${key}:`);
       return Err(S3Error.downloadFailed(key, error));
     }
-  }
-
-  public async deleteFile(key: string): Promise<Result<void, S3Error>> {
-    if (!this.initialized) {
-      return Err(S3Error.connectionFailed("S3 service not initialized"));
-    }
-
+  },
+  deleteFile: async (key: string): Promise<Result<void, S3Error>> => {
     try {
       logger.info(`Deleting file: ${key}`);
 
       const command = new DeleteObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: bucketName,
         Key: key,
       });
 
-      await this.client.send(command);
-      logger.info({ service: "s3" }, `File deleted successfully: ${key}`);
+      await s3.send(command);
+      log.info(`File deleted successfully: ${key}`);
       return Ok(undefined);
     } catch (error) {
-      logger.error({ service: "s3" }, `Delete failed for ${key}:`, error);
+      log.error(error, `Delete failed for ${key}:`);
       return Err(S3Error.downloadFailed(key, error));
     }
-  }
-
-  public async getFileMetadata(
+  },
+  getFileMetadata: async (
     key: string
-  ): Promise<Result<FileMetadata, S3Error>> {
-    if (!this.initialized) {
-      return Err(S3Error.connectionFailed("S3 service not initialized"));
-    }
-
+  ): Promise<Result<FileMetadata, S3Error>> => {
     try {
       const command = new HeadObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: bucketName,
         Key: key,
       });
 
-      const response = await this.client.send(command);
+      const response = await s3.send(command);
 
       const metadata: FileMetadata = {
         key,
@@ -261,65 +233,50 @@ export class S3Service {
 
       return Err(S3Error.downloadFailed(key, error));
     }
-  }
-
-  public async getUploadUrl(
+  },
+  getUploadUrl: async (
     key: string,
     expiresIn: number = 3600,
     contentType?: string
-  ): Promise<Result<SignedUrlResult, S3Error>> {
-    if (!this.initialized) {
-      return Err(S3Error.connectionFailed("S3 service not initialized"));
-    }
-
+  ): Promise<Result<SignedUrlResult, S3Error>> => {
     try {
       const command = new PutObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: bucketName,
         Key: key,
         ContentType: contentType,
       });
 
-      const url = await getSignedUrl(this.client, command, { expiresIn });
+      const url = await getSignedUrl(s3, command, { expiresIn });
       const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
       logger.info({ service: "s3" }, `Upload URL generated for: ${key}`);
       return Ok({ url, expiresAt });
     } catch (error) {
-      logger.error(
-        { service: "s3" },
-        `Failed to generate upload URL for ${key}:`,
-        error
-      );
+      log.error(error, `Failed to generate upload URL for ${key}:`);
       return Err(S3Error.uploadFailed(key, error));
     }
-  }
-
-  public async getDownloadUrl(
+  },
+  getDownloadUrl: async (
     key: string,
     expiresIn: number = 3600
-  ): Promise<Result<SignedUrlResult, S3Error>> {
-    if (!this.initialized) {
-      return Err(S3Error.connectionFailed("S3 service not initialized"));
-    }
-
+  ): Promise<Result<SignedUrlResult, S3Error>> => {
     try {
       const command = new GetObjectCommand({
-        Bucket: this.bucketName,
+        Bucket: bucketName,
         Key: key,
       });
 
-      const url = await getSignedUrl(this.client, command, { expiresIn });
+      const url = await getSignedUrl(s3, command, { expiresIn });
       const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
-      logger.info({ service: "s3" }, `Download URL generated for: ${key}`);
+      log.info(`Download URL generated for: ${key}`);
       return Ok({ url, expiresAt });
     } catch (error) {
-      logger.error(
-        { service: "s3" },
-        `Failed to generate download URL for ${key}:`,
-        error
-      );
+      log.error(error, `Failed to generate download URL for ${key}:`);
       return Err(S3Error.downloadFailed(key, error));
     }
-  }
-}
+  },
+  end: () => {
+    s3.destroy();
+  },
+};
