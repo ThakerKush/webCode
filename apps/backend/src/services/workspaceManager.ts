@@ -66,12 +66,14 @@ export const workspaceManager = {
     }
 
     for (const workspace of staleWorkspaces.value) {
+      log.info({ workspace }, "Archiving workspace:");
       await workspaceManager.archiveWorkspace(workspace.uuid);
     }
   },
 
   archiveWorkspace: async (projectId: string): Promise<void> => {
     try {
+      log.info(`Archiving workspace ${projectId}`);
       await db.markWorkspaceActivity(projectId, "archiving");
 
       // Export → S3 → cleanup logic stays the same
@@ -80,21 +82,39 @@ export const workspaceManager = {
         throw new Error(`Export failed: ${exportResult.error.message}`);
 
       const s3Key = `workspaces/${projectId}/${Date.now()}.tar.gz`;
+      const dbResult = await dbService.updateStorageLink(projectId, s3Key);
+      if (!dbResult.ok) {
+        log.error(
+          dbResult.error,
+          `Failed to update storage link: ${dbResult.error.message}`
+        );
+        throw new Error(
+          `Failed to update storage link: ${dbResult.error.message}`
+        );
+      }
+      log.info(`Updated storage link for ${projectId}`);
+
       const uploadResult = await s3.uploadFile(
         s3Key,
-        exportResult.value,
+        exportResult.value.stream,
         "application/gzip"
       );
-      if (!uploadResult.ok)
+      if (!uploadResult.ok) {
+        log.error(
+          uploadResult.error,
+          `Upload failed: ${uploadResult.error.message}`
+        );
         throw new Error(`Upload failed: ${uploadResult.error.message}`);
-
-      await docker.stopAndRemoveContainer(projectId);
+      }
+      log.info(`Uploaded workspace ${projectId} to S3`);
+      await docker.stopAndRemoveContainer(projectId, exportResult.value.image);
       await db.updateWorkspaceActivity(projectId, "inactive");
-
       log.info(`Archived workspace ${projectId}`);
+      return;
     } catch (error) {
       log.error(error, `Archive failed for ${projectId}:`);
       await db.updateWorkspaceActivity(projectId, "active");
+      // throw error; not sure if I have to throw the error here, this is a background service so does it have to right to throw errors?
     }
   },
   stopCleanupJob: async () => {

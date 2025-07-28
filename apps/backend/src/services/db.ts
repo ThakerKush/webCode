@@ -135,9 +135,9 @@ export const dbService = {
   },
   createProject: async (
     projectId: string,
-    userId: number,
+    userId: number
   ): Promise<Result<boolean, DbError>> => {
-    // TODO: s3 management 
+    // TODO: s3 management
     try {
       await db.insert(schema.project).values({
         userId: userId,
@@ -157,297 +157,100 @@ export const dbService = {
     projectId: string,
     activity: "active" | "inactive" | "archiving"
   ): Promise<Result<boolean, DbError>> => {
-    try{
-    const result = await db
-      .select()
-      .from(schema.project)
-      .where(
-        and(
-          eq(schema.project.uuid, projectId),
-        )
-      );
-    if (result.length === 0) {
-      return Err(DbError.notFound("project", `projectId: ${projectId}`));
+    try {
+      const result = await db
+        .select()
+        .from(schema.project)
+        .where(and(eq(schema.project.uuid, projectId)));
+      if (result.length === 0) {
+        return Err(DbError.notFound("project", `projectId: ${projectId}`));
+      }
+      const project = result[0];
+      await db
+        .update(schema.project)
+        .set({
+          lastHeartbeat: new Date(),
+          workspaceStatus: activity,
+        })
+        .where(eq(schema.project.id, project.id));
+      return Ok(true);
+    } catch (error) {
+      log.error(error, "Failed to update workspace activity");
+      return Err(DbError.queryFailed("updateWorkspaceActivity", error));
     }
-    const project = result[0];
-    await db
-      .update(schema.project)
-      .set({
-        lastHeartbeat: new Date(),
-        workspaceStatus: activity,
-      })
-      .where(eq(schema.project.id, project.id));
-    return Ok(true);
-  } catch (error) {
-    log.error(error, "Failed to update workspace activity");
-    return Err(DbError.queryFailed("updateWorkspaceActivity", error));
-  }
   },
-  updateHeartbeat: async (projectId: string): Promise<Result<void, DbError>> => {
-    try{
-    const result = await db
-      .update(schema.project)
-      .set({ lastHeartbeat: new Date() })
-      .where(eq(schema.project.uuid, projectId));
-    if (result.length === 0) {
-      return Err(DbError.notFound("project", `projectId: ${projectId}`));
+  updateHeartbeat: async (
+    projectId: string
+  ): Promise<Result<void, DbError>> => {
+    try {
+      const result = await db
+        .update(schema.project)
+        .set({ lastHeartbeat: new Date() })
+        .where(eq(schema.project.uuid, projectId));
+      if (result.length === 0) {
+        return Err(DbError.notFound("project", `projectId: ${projectId}`));
+      }
+      return Ok(undefined);
+    } catch (error) {
+      log.error(error, "Failed to update heartbeat");
+      return Err(DbError.queryFailed("updateHeartbeat", error));
     }
-    return Ok(undefined);
-  } catch (error) {
-    log.error(error, "Failed to update heartbeat");
-    return Err(DbError.queryFailed("updateHeartbeat", error));
-  }
   },
   getStaleWorkspaces: async (
     heartbeatTimeout: number
   ): Promise<Result<schema.Project[], DbError>> => {
-    try{ 
-    const cutoff = new Date(Date.now() - heartbeatTimeout);
-    const result = await db
-      .select()
-      .from(schema.project)
-      .where(
-        and(
-          eq(schema.project.workspaceStatus, "active"),
-          lt(schema.project.lastHeartbeat, cutoff)
-        )
-      );
-    return Ok(result);
-  } catch (error) {
-    log.error(error, "Failed to get stale workspaces");
-    return Err(DbError.queryFailed("getStaleWorkspaces", error));
-  }
-  },
- markWorkspaceActivity: async(projectId: string, activity: schema.Project["workspaceStatus"]) => {
-  try{
-    const result = await db.update(schema.project).set({workspaceStatus: activity}).where(eq(schema.project.uuid, projectId))
-    if(result.length === 0){
-      return Err(DbError.notFound("project", `projectId: ${projectId}`));
-    }
-    return Ok(true);
-  }catch(error){
-    log.error(error, "Failed to mark workspace activity");
-    return Err(DbError.queryFailed("markWorkspaceActivity", error));
-  }
- }
-  
-};
-
-export class DbService {
-  private log = logger.child({ service: "db" });
-  private connection: Sql;
-  private db;
-  constructor() {
-    this.log.info("Initializing db service");
-    this.connection = postgres({
-      user: config.db.POSTGRES_USER,
-      password: config.db.POSTGRES_PASSWORD,
-      host: config.db.POSTGRES_HOST,
-      port: Number(config.db.POSTGRES_PORT),
-      database: config.db.POSTGRES_DB,
-    });
-    this.db = drizzle(this.connection, { schema });
-  }
-
-  async ping(): Promise<boolean> {
     try {
-      await this.db.execute("SELECT 1");
-      return true;
-    } catch (error) {
-      this.log.error("Failed to ping database", { error });
-      return false;
-    }
-  }
-  async getMessages(
-    userId: number,
-    chatId: number
-  ): Promise<Result<schema.Message[], DbError>> {
-    try {
-      const chatResults = await this.db
+      const cutoff = new Date(Date.now() - heartbeatTimeout);
+      const result = await db
         .select()
-        .from(schema.chat)
-        .where(eq(schema.chat.userId, userId));
-      if (chatResults.length === 0) {
-        return Err(
-          DbError.notFound("chat", `userId: ${userId}, chatId: ${chatId}`)
+        .from(schema.project)
+        .where(
+          and(
+            eq(schema.project.workspaceStatus, "active"),
+            lt(schema.project.lastHeartbeat, cutoff)
+          )
         );
-      }
-      const messages = await this.db
-        .select()
-        .from(schema.message)
-        .where(eq(schema.message.chatId, chatId))
-        .orderBy(schema.message.createdAt);
-      return Ok(messages);
+      return Ok(result);
     } catch (error) {
-      this.log.error("Failed to get messages", { error });
-      return Err(DbError.queryFailed("getMessages", error));
+      log.error(error, "Failed to get stale workspaces");
+      return Err(DbError.queryFailed("getStaleWorkspaces", error));
     }
-  }
-  async createChat(chat: schema.Chat) {
-    try {
-      const chatResult = this.db.insert(schema.chat).values(chat).returning();
-      return Ok(chatResult);
-    } catch (error) {
-      this.log.error("Failed to create chat", { error });
-      return Err(DbError.queryFailed("createChat", error));
-    }
-  }
-  async createMessage(chatId: number, message: schema.Message) {
-    try {
-      // check to see if chat exists
-      const chatResult = await this.db
-        .select()
-        .from(schema.chat)
-        .where(eq(schema.chat.id, chatId));
-      if (chatResult.length === 0) {
-        return Err(DbError.notFound("chat", `chatId: ${chatId}`));
-      }
-      const messageResult = await this.db
-        .insert(schema.message)
-        .values(message)
-        .returning();
-      return Ok(messageResult);
-    } catch (error) {
-      this.log.error("Failed to create message", { error });
-      return Err(DbError.queryFailed("createMessage", error));
-    }
-  }
-  async createProject(projectId: string, userId: number, chatId: number) {
-    try {
-      const chatResult = await this.db
-        .select()
-        .from(schema.chat)
-        .where(eq(schema.chat.id, chatId))
-        .limit(1);
-      // fix later
-      if (!chatResult || chatResult[0].userId != userId) {
-        return Err(DbError.queryFailed(`createProject`, "you don't own this"));
-      }
-      //do something with s3 here
-      // create new project
-      const projectResult = await this.db.insert(schema.project).values({
-        userId: userId,
-        uuid: projectId,
-        storageLink: "dummyForNow",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      return Ok(projectResult);
-    } catch (error) {
-      this.log.error("Failed to create project", { error });
-      return Err(DbError.queryFailed("createProject", error));
-    }
-  }
-  async updateWorkspaceActivity(
+  },
+  markWorkspaceActivity: async (
     projectId: string,
-    userId: number,
-    activity: "active" | "inactive" | "archiving"
-  ) {
-    const result = await this.db
-      .select()
-      .from(schema.project)
-      .where(
-        and(
-          eq(schema.project.uuid, projectId),
-          eq(schema.project.userId, userId)
-        )
-      );
-    if (result.length === 0) {
-      return Err(DbError.notFound("project", `projectId: ${projectId}`));
-    }
-    const project = result[0];
-    const updatedProject = await this.db
-      .update(schema.project)
-      .set({
-        lastHeartbeat: new Date(),
-        workspaceStatus: activity,
-      })
-      .where(eq(schema.project.id, project.id));
-    return Ok(updatedProject);
-  }
-  async updateHeartbeat(projectId: string): Promise<Result<void, DbError>> {
-    const result = await this.db
-      .update(schema.project)
-      .set({ lastHeartbeat: new Date() })
-      .where(eq(schema.project.uuid, projectId));
-    if (result.length === 0) {
-      return Err(DbError.notFound("project", `projectId: ${projectId}`));
-    }
-    return Ok(undefined);
-  }
-  async getStaleWorkspaces(
-    heartbeatTimeout: number
-  ): Promise<Result<schema.Project[], DbError>> {
-    const cutoff = new Date(Date.now() - heartbeatTimeout);
-    const result = await this.db
-      .select()
-      .from(schema.project)
-      .where(
-        and(
-          eq(schema.project.workspaceStatus, "active"),
-          lt(schema.project.lastHeartbeat, cutoff)
-        )
-      );
-    return Ok(result);
-  }
-  async markWorkspaceArchiving(
-    projectId: string
-  ): Promise<Result<void, DbError>> {
-    const result = await this.db
-      .update(schema.project)
-      .set({ workspaceStatus: "archiving" })
-      .where(eq(schema.project.uuid, projectId));
-    if (result.length === 0) {
-      return Err(DbError.notFound("project", `projectId: ${projectId}`));
-    }
-    return Ok(undefined);
-  }
-
-  async markWorkspaceInactive(
-    projectId: string
-  ): Promise<Result<void, DbError>> {
-    const result = await this.db
-      .update(schema.project)
-      .set({
-        workspaceStatus: "inactive",
-      })
-      .where(eq(schema.project.uuid, projectId));
-    if (result.length === 0) {
-      return Err(DbError.notFound("project", `projectId: ${projectId}`));
-    }
-    return Ok(undefined);
-  }
-  async markWorkspaceActive(projectId: string): Promise<Result<void, DbError>> {
+    activity: schema.Project["workspaceStatus"]
+  ) => {
     try {
-      const result = await this.db
+      const result = await db
         .update(schema.project)
-        .set({ workspaceStatus: "active" })
+        .set({ workspaceStatus: activity })
         .where(eq(schema.project.uuid, projectId));
       if (result.length === 0) {
         return Err(DbError.notFound("project", `projectId: ${projectId}`));
       }
-      return Ok(undefined);
+      return Ok(true);
     } catch (error) {
-      return Err(DbError.queryFailed("markWorkspaceActive", error));
+      log.error(error, "Failed to mark workspace activity");
+      return Err(DbError.queryFailed("markWorkspaceActivity", error));
     }
-  }
-
-  async updateProjectStorageLink(
+  },
+  updateStorageLink: async (
     projectId: string,
     storageLink: string
-  ): Promise<Result<void, DbError>> {
+  ): Promise<Result<boolean, DbError>> => {
     try {
-      const result = await this.db
+      const result = await db
         .update(schema.project)
-        .set({ storageLink })
-        .where(eq(schema.project.uuid, projectId));
+        .set({ storageLink: storageLink })
+        .where(eq(schema.project.uuid, projectId))
+        .returning({ uuid: schema.project.uuid });
       if (result.length === 0) {
         return Err(DbError.notFound("project", `projectId: ${projectId}`));
       }
-      return Ok(undefined);
+      return Ok(true);
     } catch (error) {
-      return Err(DbError.queryFailed("updateProjectStorageLink", error));
+      log.error(error, "Failed to update storage link");
+      return Err(DbError.queryFailed("updateStorageLink", error));
     }
-  }
-}
+  },
+};

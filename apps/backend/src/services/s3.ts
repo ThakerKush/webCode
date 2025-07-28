@@ -7,6 +7,7 @@ import {
   HeadObjectCommand,
   ListBucketsCommand,
 } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { BaseError } from "../errors/baseError.js";
 import config from "../config/index.js";
 import { Err, Ok, type Result } from "../errors/result.js";
@@ -102,6 +103,7 @@ export const setupS3 = async () => {
       accessKeyId: accessKeyId,
       secretAccessKey: secretAccessKey,
     },
+    requestChecksumCalculation: "WHEN_REQUIRED",
     forcePathStyle: forcePathStyle,
   });
   try {
@@ -184,6 +186,32 @@ export const s3Service = {
       }
 
       log.error(error, `Download failed for ${key}:`);
+      return Err(S3Error.downloadFailed(key, error));
+    }
+  },
+  getFileStream: async (key: string): Promise<Result<Readable, S3Error>> => {
+    try {
+      log.info(`Getting file stream ${key}`);
+      const command = new GetObjectCommand({
+        Bucket: bucketName,
+        Key: key,
+      });
+      const response = await s3.send(command);
+      if (!response.Body) {
+        return Err(S3Error.notFound(key));
+      }
+
+      const stream = response.Body as Readable;
+      log.info(`File Stream retrieved sucessfully: ${key}`);
+      return Ok(stream);
+    } catch (error: any) {
+      if (
+        error.name === "NoSuchKey" ||
+        error.$metadata?.httpStatusCode === 404
+      ) {
+        return Err(S3Error.notFound(key));
+      }
+      log.error(error, `Stream download failed for ${key}:`);
       return Err(S3Error.downloadFailed(key, error));
     }
   },

@@ -25,6 +25,65 @@ Server Refactor:
 
 imageName="code-workspace:latestV2
 
+Get workspace back after archiving
+
+/agent/run --> 1. Create workspace < getOrCreateWorkspace > --> 2. Start the agent
+
+Create workspace:
+
+1. Inset into project table
+   get a s3 storage link --> project has an s3 storage link
+
+CRUD Routes for Projects --> WHY??
+
+Workspace Created --> Agent Runs --> Workspace Updated --> Workspace Saved
+
+Agent ALWAYS requires a workspace
+
+/chat/:
+Initial Prompt
+Setup the workspace
+WorkSpaceInfo --> Be in an in memory map < dies every 10 mins >
+
+/chat/<chatId>
+type smth
+
+/agent/inoke:
+Prompt, userId, chatId
+extract projectId from chatId --> db.select()
+if(workspace in map){
+context.run(workspaceinfo, ()=> agent)
+}else{
+getWorkspace(projectId, userId){
+const result = db.select().project().where(eq(projectId, project.uuid))
+if(result.status === "active"){
+const container = await docker.getContainer(proejctId)
+}else{
+workspaceInfo = restoreFromS3(projectId)
+}
+context.run(workspaceInfo, ()=> agent)
+}
+}
+
+---
+
+---
+
+agent:
+
+1. fetch message from db
+2. onFinish(()=> StoreMessagesDb(meessages))
+
+MessageQueue:
+Frontend -->
+
+In export container wait for s3 to upload then delete the image, doing it right after returning migth lead to data loss
+
+WORKSPACE MANAGER CANNOT THROW ERRORS 
+---
+
+OrCreate --> getWorkspace --> Restoring OR Just getting
+
 ---
 
 serve(
