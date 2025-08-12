@@ -73,7 +73,7 @@ export type Verification = InferSelectModel<typeof verification>;
 export const chat = pgTable("Chat", {
   id: serial("id").notNull().primaryKey(),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
-  title: text("title").notNull(),
+  title: text("title"),
   userId: integer("userId")
     .notNull()
     .references(() => user.id),
@@ -81,11 +81,13 @@ export const chat = pgTable("Chat", {
     .notNull()
     .default("private"),
   projectId: integer("projectId").references(() => project.id),
+  uuid: uuid("uuid").notNull(),
 });
 export type Chat = InferSelectModel<typeof chat>;
 
 export const message = pgTable("Message_v2", {
   id: serial("id").primaryKey().notNull(),
+  messageUuid: uuid("messageUuid").notNull().unique(),
   chatId: integer("chatId")
     .notNull()
     .references(() => chat.id),

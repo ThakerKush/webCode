@@ -27,7 +27,7 @@ export const write: Tool = tool({
         { child: "write tool" },
         `File ${path} written successfully with ${content}`
       );
-      return "File written successfully";
+      return `File written successfully to ${path}`;
     } else {
       logger.error(
         { child: "write tool" },

@@ -23,8 +23,6 @@ export const fin: Tool = tool({
       { child: "serve tool" },
       `Project served with run command ${run} and build command ${build}`
     );
-    return {
-      message: `Project served with run command ${run} and build command ${build}`,
-    };
+    return `Project served with run command ${run} and build command ${build}`;
   },
 });

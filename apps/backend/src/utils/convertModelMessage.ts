@@ -2,6 +2,7 @@
 
 import * as schema from "@repo/db/schema";
 import {
+  convertToModelMessages,
   type AssistantModelMessage,
   type FilePart,
   type ImagePart,
@@ -9,17 +10,18 @@ import {
   type TextPart,
   type ToolCallPart,
   type ToolResultPart,
+  type UIMessage,
   type UserModelMessage,
 } from "ai";
 
-// For now this is it, don't konw what'll happen later 
-
 export function convertModelMessage(message: schema.Message[]): ModelMessage[] {
-  return message.map((message) => {
-    const modelMessage: ModelMessage = {
-      role: message.role as "user" | "system" | "assistant" | "tool",
-      content: message.parts as any,
+  const uiMessages = message.map((message) => {
+    const uiMessage: UIMessage = {
+      id: message.messageUuid,
+      role: message.role as "user" | "system" | "assistant",
+      parts: message.parts as any,
     };
-    return modelMessage;
+    return uiMessage;
   });
+  return convertToModelMessages(uiMessages);
 }

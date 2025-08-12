@@ -136,14 +136,18 @@ export const s3Service = {
     try {
       logger.info({ service: "s3" }, `Uploading file: ${key}`);
 
-      const command = new PutObjectCommand({
-        Bucket: bucketName,
-        Key: key,
-        Body: body,
-        ContentType: contentType,
+      const command = new Upload({
+        client: s3,
+        params: {
+          Bucket: bucketName,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+        },
       });
 
-      const response = await s3.send(command);
+      // Umm make sure that I'm not upliading like 100GBs to s3?
+      const response = await command.done();
 
       const result: UploadResult = {
         key,

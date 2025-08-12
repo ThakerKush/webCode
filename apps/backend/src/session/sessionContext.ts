@@ -6,6 +6,7 @@ export interface SessionContext {
   workspaceInfo: WorkspaceInfo;
   runCommand?: string;
   buildCommand?: string;
+  projectDescription?: string;
 }
 
 class SessionContextManager {

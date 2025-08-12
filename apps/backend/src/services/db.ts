@@ -79,45 +79,92 @@ export const dbService = {
     }
   },
 
-  getMessages: async (
+  getChatInfo: async (
     userId: number,
-    chatId: number
-  ): Promise<Result<schema.Message[], DbError>> => {
+    chatUuid: string
+  ): Promise<
+    Result<
+      {
+        messages: schema.Message[];
+        chat: schema.Chat;
+        project: schema.Project | null;
+      },
+      DbError
+    >
+  > => {
     try {
-      const chatResults = await db
-        .select()
+      // Single query with JOINs to get chat, messages, and project
+      const results = await db
+        .select({
+          chat: schema.chat,
+          project: schema.project,
+          message: schema.message,
+        })
         .from(schema.chat)
-        .where(eq(schema.chat.userId, userId));
-      if (chatResults.length === 0) {
+        .leftJoin(schema.project, eq(schema.chat.projectId, schema.project.id))
+        .leftJoin(schema.message, eq(schema.message.chatId, schema.chat.id))
+        .where(
+          and(eq(schema.chat.uuid, chatUuid), eq(schema.chat.userId, userId))
+        )
+        .orderBy(schema.message.createdAt);
+
+      if (results.length === 0) {
         return Err(
-          DbError.notFound("chat", `userId: ${userId}, chatId: ${chatId}`)
+          DbError.notFound("chat", `userId: ${userId}, chatId: ${chatUuid}`)
         );
       }
-      const messages = await db
-        .select()
-        .from(schema.message)
-        .where(eq(schema.message.chatId, chatId))
-        .orderBy(schema.message.createdAt);
-      return Ok(messages);
+
+      // Extract chat and project (same across all rows)
+      const chat = results[0].chat;
+      const project = results[0].project;
+
+      // Extract and filter messages (remove nulls from LEFT JOIN)
+      const messages = results
+        .map((row) => row.message)
+        .filter((message): message is schema.Message => message !== null);
+
+      return Ok({ messages, chat, project });
     } catch (error) {
-      log.error(error, "Failed to get messages");
-      return Err(DbError.queryFailed("getMessages", error));
+      log.error(error, "Failed to get chat info");
+      return Err(DbError.queryFailed("getChatInfo", error));
     }
   },
 
-  createChat: async (chat: schema.Chat): Promise<Result<boolean, DbError>> => {
+  getProject: async (
+    projectId: string
+  ): Promise<Result<schema.Project, DbError>> => {
     try {
-      await db.insert(schema.chat).values(chat).returning();
-      return Ok(true);
+      const project = await db
+        .select()
+        .from(schema.project)
+        .where(eq(schema.project.uuid, projectId));
+      if (project.length === 0) {
+        return Err(DbError.notFound("project", `projectId: ${projectId}`));
+      }
+      return Ok(project[0]);
+    } catch (error) {
+      log.error(error, "Failed to get project");
+      return Err(DbError.queryFailed("getProject", error));
+    }
+  },
+  insertChat: async (
+    chat: Omit<schema.Chat, "id">
+  ): Promise<Result<number, DbError>> => {
+    try {
+      const chatResult = await db
+        .insert(schema.chat)
+        .values(chat)
+        .returning({ id: schema.chat.id });
+      return Ok(chatResult[0].id);
     } catch (error) {
       log.error(error, "Failed to create chat");
       return Err(DbError.queryFailed("createChat", error));
     }
   },
-  createMessage: async (
+  insertMessage: async (
     chatId: number,
-    message: schema.Message
-  ): Promise<Result<boolean, DbError>> => {
+    message: Omit<schema.Message, "id">
+  ): Promise<Result<number, DbError>> => {
     try {
       const chatResult = await db
         .select()
@@ -126,28 +173,35 @@ export const dbService = {
       if (chatResult.length === 0) {
         return Err(DbError.notFound("chat", `chatId: ${chatId}`));
       }
-      await db.insert(schema.message).values(message).returning();
-      return Ok(true);
+      const messageResult = await db
+        .insert(schema.message)
+        .values(message)
+        .returning({ id: schema.message.id });
+      return Ok(messageResult[0].id);
     } catch (error) {
       log.error(error, "Failed to create message");
       return Err(DbError.queryFailed("createMessage", error));
     }
   },
-  createProject: async (
+  insertProject: async (
     projectId: string,
-    userId: number
-  ): Promise<Result<boolean, DbError>> => {
+    userId: number,
+    workspaceStatus: "active" | "inactive"
+  ): Promise<Result<number, DbError>> => {
     // TODO: s3 management
     try {
-      await db.insert(schema.project).values({
-        userId: userId,
-        uuid: projectId,
-        storageLink: "dummyForNow",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      const project = await db
+        .insert(schema.project)
+        .values({
+          userId: userId,
+          uuid: projectId,
+          workspaceStatus: workspaceStatus,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning({ id: schema.project.id });
 
-      return Ok(true);
+      return Ok(project[0].id);
     } catch (error) {
       log.error(error, "Failed to create project");
       return Err(DbError.queryFailed("createProject", error));

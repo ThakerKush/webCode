@@ -43,11 +43,14 @@ export const terminal: Tool = tool({
         },
         `Terminal tool executed. Result:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}\nExit Code: ${result.exitCode}`
       );
-      return {
-        stdout: result.stdout,
-        stderr: result.stderr,
-        exitCode: result.exitCode,
-      };
+      return `Command executed sucessfuly.
+      STDOUT: 
+      ${result.stdout}
+      STDERR:
+      ${result.stderr}
+      Exit Code:
+      ${result.exitCode}
+      `;
     } catch (error) {
       logger.error(
         { child: "terminal tool" },

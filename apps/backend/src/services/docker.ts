@@ -9,7 +9,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { Readable } from "stream";
 import { createGzip } from "zlib";
-import type { dbService } from "./db.js";
+import { dbService } from "./db.js";
 
 export type WorkspaceInfo = {
   containerId: string;
@@ -165,27 +165,18 @@ export const dockerService = {
       return Err(DockerError.containerError("unknownError"));
     }
   },
-  getOrCreateWorkspace: async (
+  createBaseWorkspace: async (
     projectId: string,
-    userId: number,
     imageName: string
   ): Promise<Result<WorkspaceInfo, DockerError>> => {
     try {
-      let container = docker.getContainer(projectId);
-      let containerInfo;
-      // if getting container fails then fetch s3??
-      try {
-        containerInfo = await container.inspect();
-      } catch (err) {
-        const createResult = await dockerService.makeContaier(
-          imageName,
-          projectId
-        );
-        if (!createResult.ok) {
-          log.error(createResult.error, "error at docker service");
-          return Err(createResult.error);
-        }
-        return createResult;
+      const createResult = await dockerService.makeContaier(
+        imageName,
+        projectId
+      );
+      if (!createResult.ok) {
+        log.error(createResult.error, "error at docker service");
+        return Err(createResult.error);
       }
 
       const shellResult = await dockerService.startShellSession(projectId);
@@ -195,13 +186,13 @@ export const dockerService = {
       }
 
       const workspaceInfo: WorkspaceInfo = {
-        containerId: containerInfo.Id,
+        containerId: createResult.value.containerId,
         projectId,
         shellSession: shellResult.value,
-        imageName: containerInfo.Config.Image,
-        createdAt: new Date(containerInfo.Created), // umm not sure if this is right...but okay
-        updatedAt: new Date(), // Or use containerInfo.State.StartedAt
-        status: containerInfo.State.Status,
+        imageName: createResult.value.imageName,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        status: createResult.value.status,
       };
       return Ok(workspaceInfo);
     } catch (error) {
@@ -262,6 +253,71 @@ export const dockerService = {
       return Err(DockerError.containerError("unknownError", error));
     }
   },
+  getWorkspace: async (
+    projectId: string
+  ): Promise<Result<WorkspaceInfo, DockerError>> => {
+    try {
+      const container = docker.getContainer(projectId);
+      const status = await container.inspect();
+
+      const shellResult = await dockerService.startShellSession(projectId);
+      if (!shellResult.ok) {
+        log.error(shellResult.error, String(shellResult.error));
+        return Err(shellResult.error);
+      }
+
+      const workspaceInfo: WorkspaceInfo = {
+        containerId: container.id,
+        projectId,
+        shellSession: shellResult.value,
+        imageName: status.Image,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        status: status.State.Status,
+      };
+      return Ok(workspaceInfo);
+    } catch (error) {
+      log.error(error, "error at docker service");
+      return Err(DockerError.containerError("unknownError", error));
+    }
+  },
+  getCompressedArchive: async (
+    projectId: string
+  ): Promise<Result<Readable, DockerError>> => {
+    try {
+      const container = docker.getContainer(projectId);
+
+      const workspaceArchive = await container.getArchive({
+        id: container.id,
+        path: "/workspace",
+      });
+      log.info("workspace archive retrieved successfully");
+      const gzipStream = createGzip();
+
+      const compressedStream = workspaceArchive.pipe(gzipStream);
+      log.info("workspace archive compressed");
+      return Ok(compressedStream);
+    } catch (error) {
+      log.error(error, "error at docker service");
+      return Err(DockerError.containerError("unknownError", error));
+    }
+  },
+
+  extractArchive: async (
+    projectId: string,
+    stream: Readable
+  ): Promise<Result<void, DockerError>> => {
+    try {
+      // This method should get a running container, that's why the container has to be running before this is called
+      const container = docker.getContainer(projectId);
+      await container.putArchive(stream, { path: "/" });
+      log.info(`workspace ${projectId} restored`);
+      return Ok(undefined);
+    } catch (error) {
+      log.error(error, "error at docker service");
+      return Err(DockerError.containerError("unknownError", error));
+    }
+  },
   exportContainer: async (
     projectId: string
   ): Promise<
@@ -274,7 +330,7 @@ export const dockerService = {
       );
 
       const container = docker.getContainer(projectId);
-      
+
       const commitResult = await container.commit({
         repo: `code-workspace-${projectId}`,
         tag: "latest",
@@ -296,17 +352,15 @@ export const dockerService = {
     }
   },
   stopAndRemoveContainer: async (
-    projectId: string,
-    image: Docker.Image
+    projectId: string
   ): Promise<Result<void, DockerError>> => {
     try {
       const container = docker.getContainer(projectId);
       await container.stop({ t: 10 });
       await container.remove({ force: true });
-      await image.remove({ force: true });
       log.info(
         { child: "stopAndRemoveContainer" },
-        `Container ${projectId} stopped and removed, image ${image.id} removed`
+        `Container ${projectId} stopped and removed`
       );
       return Ok(undefined);
     } catch (error) {

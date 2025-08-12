@@ -23,6 +23,9 @@ importers:
       '@ai-sdk/openai':
         specifier: 2.0.0-beta.7
         version: 2.0.0-beta.7(zod@3.25.76)
+      '@ai-sdk/provider':
+        specifier: 2.0.0-beta.2
+        version: 2.0.0-beta.2
       '@aws-sdk/client-s3':
         specifier: ^3.850.0
         version: 3.850.0
@@ -39,8 +42,8 @@ importers:
         specifier: ^0.7.0
         version: 0.7.1(hono@4.8.5)(zod@3.25.76)
       '@openrouter/ai-sdk-provider':
-        specifier: 1.0.0-beta.1
-        version: 1.0.0-beta.1(ai@5.0.0-beta.17(zod@3.25.76))(zod@3.25.76)
+        specifier: 1.0.0-beta.5
+        version: 1.0.0-beta.5(ai@5.0.0-beta.17(zod@3.25.76))(zod@3.25.76)
       '@repo/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -304,6 +307,10 @@ packages:
 
   '@ai-sdk/provider@2.0.0-beta.1':
     resolution: {integrity: sha512-Z8SPncMtS3RsoXITmT7NVwrAq6M44dmw0DoUOYJqNNtCu8iMWuxB8Nxsoqpa0uEEy9R1V1ZThJAXTYgjTUxl3w==}
+    engines: {node: '>=18'}
+
+  '@ai-sdk/provider@2.0.0-beta.2':
+    resolution: {integrity: sha512-vqhtZA7R24q1XnmfmIb1fZSmHMIaJH1BVQ+0kFnNJgqWsc+V8i+yfetZ37gUc4fXATFmBuS/6O7+RPoHsZ2Fqg==}
     engines: {node: '>=18'}
 
   '@alloc/quick-lru@5.2.0':
@@ -1112,12 +1119,12 @@ packages:
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
 
-  '@openrouter/ai-sdk-provider@1.0.0-beta.1':
-    resolution: {integrity: sha512-LsfB425JuE9qiQFnhkm3sn1Vf34W511QIeGnALwvr6nbl1yu2QhlX0N9kL2dPipLbNVWDszmlHe7DsK5ZuzSsg==}
+  '@openrouter/ai-sdk-provider@1.0.0-beta.5':
+    resolution: {integrity: sha512-KEsvc+6n80O7tPXanRelcoRvIv9RAVLFKQFKiQoXLDwVdxY9J/g8dNXVEfWsBOOSiyt/0N392RCku0TaYZIRlg==}
     engines: {node: '>=18'}
     peerDependencies:
       ai: ^5.0.0-beta.12
-      zod: ^3.25.74
+      zod: ^3.24.1 || ^v4
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -3758,6 +3765,10 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
+  '@ai-sdk/provider@2.0.0-beta.2':
+    dependencies:
+      json-schema: 0.4.0
+
   '@alloc/quick-lru@5.2.0': {}
 
   '@ampproject/remapping@2.3.0':
@@ -4702,7 +4713,7 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
-  '@openrouter/ai-sdk-provider@1.0.0-beta.1(ai@5.0.0-beta.17(zod@3.25.76))(zod@3.25.76)':
+  '@openrouter/ai-sdk-provider@1.0.0-beta.5(ai@5.0.0-beta.17(zod@3.25.76))(zod@3.25.76)':
     dependencies:
       ai: 5.0.0-beta.17(zod@3.25.76)
       zod: 3.25.76
