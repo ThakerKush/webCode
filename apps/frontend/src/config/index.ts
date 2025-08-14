@@ -12,14 +12,13 @@ declare global {
       BETTER_AUTH_URL: string;
 
       POSTGRES_USER: string;
-      POSTGRES_PASSWORD:string
+      POSTGRES_PASSWORD: string;
       POSTGRES_PORT: number;
       POSTGRES_DB: string;
       POSTGRES_HOST: string;
 
       GOOGLE_CLIENT_ID: string;
       GOOGLE_CLIENT_SECRET: string;
-
     }
   }
 }
@@ -32,15 +31,18 @@ export default {
     POSTGRES_HOST: process.env.POSTGRES_HOST,
   },
   auth: {
-  BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
-  BETTER_AUTH_URL: process.env.BETTER_AUTH_URL, 
+    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
+    BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
 
-  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
   },
-  
+
   OPENROUTERAPIKEY: process.env.OPENROUTERAPIKEY,
   constants,
-  redis: {
+
+  backend: {
+    url: process.env.BACKEND_URL,
   },
+  redis: {},
 } as const;
