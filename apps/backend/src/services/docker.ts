@@ -409,4 +409,57 @@ export const dockerService = {
       })
     );
   },
+  setupFileWatcher: async (containerId: string): Promise<Readable> => {
+    const container = docker.getContainer(containerId);
+    const watcherExec = await container.exec({
+      Cmd: [
+        "chokidar",
+        "/workspace/**/*",
+        "--ignore",
+        "**/node_modules/**",
+        "--ignore",
+        "**/\.git/**",
+        "--initial",
+      ],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+    const stream = await watcherExec.start({ hijack: true, stdin: false });
+
+    return stream;
+  },
+  listFiles: async (
+    containerId: string
+  ): Promise<
+    Result<
+      { path: string; name: string | undefined; isDirectory: boolean }[],
+      DockerError
+    >
+  > => {
+    try {
+      const files = await dockerService.executeCommand(containerId, [
+        "sh",
+        "-c",
+        'find /workspace | grep -v -E \'(node_modules|\\.git)\' | while read path; do if [ -d "$path" ]; then echo "$path:DIR"; else echo "$path:FILE"; fi; done',
+      ]);
+      if (!files.ok) {
+        return Err(DockerError.containerError("unknownError", files.error));
+      }
+      const fileFormated = files.value.stdout
+        .split("\n")
+        .filter((line) => line.trim())
+        .map((line) => {
+          const [fullPath, type] = line.trim().split(":");
+          const relativePath = fullPath.replace("/workspace/", "") || fullPath;
+          return {
+            path: relativePath,
+            name: relativePath.split("/").pop(),
+            isDirectory: type === "DIR",
+          };
+        });
+      return Ok(fileFormated);
+    } catch (error) {
+      return Err(DockerError.containerError("unknownError", error));
+    }
+  },
 };

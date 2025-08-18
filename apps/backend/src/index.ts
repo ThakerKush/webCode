@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import app from "./app/index.js";
+import { app, injectWebSocket } from "./app/index.js";
 import config from "./config/index.js";
 import loaders from "./loaders/index.js";
 import { logger } from "./utils/log.js";
@@ -28,7 +28,7 @@ async function startServer() {
   await loaders();
   const port = Number(config.port);
 
-  serve(
+  const server = serve(
     {
       fetch: app.fetch, // Make sure app.fetch exists
       port,
@@ -39,6 +39,6 @@ async function startServer() {
       });
     }
   );
+  injectWebSocket(server);
 }
-
 startServer();

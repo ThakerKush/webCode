@@ -19,6 +19,8 @@ declare global {
 
       GOOGLE_CLIENT_ID: string;
       GOOGLE_CLIENT_SECRET: string;
+      NEXT_PUBLIC_BACKEND_URL: string;
+      NEXT_PUBLIC_BACKEND_WS_URL: string;
     }
   }
 }
@@ -42,7 +44,8 @@ export default {
   constants,
 
   backend: {
-    url: process.env.BACKEND_URL,
+    url: process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001",
+    wsUrl: process.env.NEXT_PUBLIC_BACKEND_WS_URL || "ws://localhost:3001",
   },
   redis: {},
 } as const;

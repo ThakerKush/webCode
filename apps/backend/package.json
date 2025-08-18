@@ -6,6 +6,9 @@
     "build": "tsc",
     "start": "node dist/index.js"
   },
+  "exports": {
+    "./types/*": "./src/app/types.ts"
+  },
   "dependencies": {
     "@ai-sdk/openai": "2.0.0-beta.7",
     "@ai-sdk/provider": "2.0.0-beta.2",
@@ -13,12 +16,13 @@
     "@aws-sdk/lib-storage": "^3.850.0",
     "@aws-sdk/s3-request-presigner": "^3.850.0",
     "@hono/node-server": "^1.15.0",
+    "@hono/node-ws": "^1.2.0",
     "@hono/zod-validator": "^0.7.0",
     "@openrouter/ai-sdk-provider": "1.0.0-beta.5",
     "@repo/db": "workspace:*",
     "@types/dockerode": "^3.3.42",
     "@types/tar-fs": "^2.0.4",
-    "ai": "5.0.0-beta.17",
+    "ai": "5.0.14",
     "close-with-grace": "^2.2.0",
     "diff": "^8.0.2",
     "dockerode": "^4.0.7",

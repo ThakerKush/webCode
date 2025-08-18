@@ -307,4 +307,44 @@ export const dbService = {
       return Err(DbError.queryFailed("updateStorageLink", error));
     }
   },
+
+  getSessionByToken: async (
+    token: string
+  ): Promise<Result<schema.Session, DbError>> => {
+    try {
+      const sessionResult = await db
+        .select()
+        .from(schema.session)
+        .where(eq(schema.session.token, token))
+        .limit(1);
+
+      if (sessionResult.length === 0) {
+        return Err(DbError.notFound("Session", token));
+      }
+
+      return Ok(sessionResult[0]);
+    } catch (error) {
+      log.error(error, "Failed to get session by token");
+      return Err(DbError.queryFailed("getSessionByToken", error));
+    }
+  },
+
+  getUser: async (userId: number): Promise<Result<schema.User, DbError>> => {
+    try {
+      const userResult = await db
+        .select()
+        .from(schema.user)
+        .where(eq(schema.user.id, userId))
+        .limit(1);
+
+      if (userResult.length === 0) {
+        return Err(DbError.notFound("User", userId.toString()));
+      }
+
+      return Ok(userResult[0]);
+    } catch (error) {
+      log.error(error, "Failed to get user by ID");
+      return Err(DbError.queryFailed("getUserById", error));
+    }
+  },
 };

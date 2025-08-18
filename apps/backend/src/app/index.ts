@@ -1,25 +1,28 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { DbError, dbService } from "../services/db.js";
+import { db, DbError, dbService } from "../services/db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logger } from "../utils/log.js";
 import { dockerService, type WorkspaceInfo } from "../services/docker.js";
+import { createNodeWebSocket } from "@hono/node-ws";
 import {
   convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
   hasToolCall,
   stepCountIs,
   streamText,
   type UserModelMessage,
 } from "ai";
 import { registery } from "./registry.js";
-import { terminal } from "../tool/terminal.js";
+import { terminalTool } from "../tool/terminal.js";
 import {
   sessionContext,
   type SessionContext,
 } from "../session/sessionContext.js";
 import { read } from "../tool/read.js";
-import { write } from "../tool/write.js";
+import { createWrite } from "../tool/write.js";
 import { edit } from "../tool/edit.js";
 import { fin } from "../tool/serve.js";
 import { describe } from "../tool/describte.js";
@@ -30,23 +33,42 @@ import {
   workspaceManager,
 } from "../services/workspaceManager.js";
 import { convertModelMessage } from "../utils/convertModelMessage.js";
+import { readFileSync } from "fs";
+import { ChatMessage, WsClientMessages, WsServerMessages } from "./types.js";
+import { join } from "path";
+import { Message } from "@repo/db/schema";
 
 const app = new Hono();
 const log = logger.child({ service: "backend" });
-const imageName = "code-workspace:latestV2";
-// Eventuallly this will have a model selector
+const imageName = "code-workspace:latestV3";
+
+const textPartSchema = z.object({
+  type: z.enum(["text"]),
+  text: z.string().min(1).max(2000),
+});
+
+const filePartSchema = z.object({
+  type: z.enum(["file"]),
+  mediaType: z.enum(["image/jpeg", "image/png"]),
+  name: z.string().min(1).max(100),
+  url: z.string().url(),
+});
+
+const partSchema = z.union([textPartSchema, filePartSchema]);
+const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+
 app
   .post(
-    "/chat",
+    "/chat/new",
     zValidator(
       "json",
       z.object({
         userId: z.number(),
-        prompt: z.string(),
+        chatId: z.string(),
       })
     ),
     async (c) => {
-      const { userId, prompt } = c.req.valid("json");
+      const { userId, chatId } = c.req.valid("json");
       const projectId = uuidv4();
       const container = await dockerService.createBaseWorkspace(
         projectId,
@@ -81,76 +103,47 @@ app
         workspaceInfo: container.value,
       };
       setSessionContext(projectId, context);
-      const chatId = await dbService.insertChat({
+      const chat = await dbService.insertChat({
         userId,
         projectId: project.value,
         title: null,
         visibility: "private",
-        uuid: uuidv4(),
+        uuid: chatId,
         createdAt: new Date(),
       });
 
-      if (!chatId.ok) {
+      if (!chat.ok) {
         log.info(
-          { route: "/chat", error: chatId.error },
+          { route: "/chat", error: chat.error },
           "Error when creating chat"
         );
-        return c.json({ error: chatId.error }, 500);
+        return c.json({ error: chat.error }, 500);
       }
-      // TODO: add error handling and cleanup
-      const aiStream = await sessionContext.run(context, async () => {
-        const result = streamText({
-          model: registery.languageModel("openRouter:google/gemini-2.5-flash"),
-          system: `You are a helpful coding agent with access to a Docker workspace. You can execute terminal commands, read/write files, and edit code. Your goal is to help users build applications, primarily using Vite and modern web technologies. Wrok step by step and use tools as needed to acomplish the users needs.`,
-          tools: {
-            terminal,
-            read,
-            write,
-            edit,
-            describe,
-            fin,
-          },
-          stopWhen: stepCountIs(50),
-          prompt,
-        });
-        return result.toUIMessageStreamResponse({
-          onFinish: async ({ messages, responseMessage }) => {
-            const userMessage = {
-              chatId: chatId.value,
-              messageUuid: uuidv4(),
-              role: "user",
-              parts: [{ type: "text", text: prompt }],
-              attachments: [],
-              createdAt: new Date(),
-            };
-            await dbService.insertMessage(chatId.value, userMessage);
-
-            const messageToSave = {
-              chatId: chatId.value,
-              messageUuid: uuidv4(),
-              role: responseMessage.role,
-              parts: responseMessage.parts,
-              attachments: [], // do attachments need to be different from parts?
-              createdAt: new Date(),
-            };
-            await dbService.insertMessage(chatId.value, messageToSave);
-          },
-        });
-      });
-      return aiStream;
     }
   )
   .post(
-    "/chat/:chatId",
-    zValidator("param", z.object({ chatId: z.string() })),
+    "/chat",
     //TODO: add attachment supoprt here
-    zValidator("json", z.object({ userId: z.number(), prompt: z.string() })),
+    zValidator(
+      "json",
+      z.object({
+        id: z.string().uuid(),
+        userId: z.number(),
+        message: z.object({
+          id: z.string().uuid(),
+          role: z.enum(["user"]),
+          parts: z.array(partSchema),
+        }),
+        modelProvider: z.string(),
+        modeName: z.string(),
+      })
+    ),
     async (c) => {
       try {
-        const { chatId } = c.req.valid("param");
-        const { userId, prompt } = c.req.valid("json");
+        const { userId, id, message, modelProvider, modeName } =
+          c.req.valid("json");
 
-        const messageResult = await dbService.getChatInfo(userId, chatId);
+        const messageResult = await dbService.getChatInfo(userId, id);
         if (!messageResult.ok) {
           log.error(
             { route: "/chat/:id", error: messageResult.error },
@@ -162,85 +155,355 @@ app
         let context: SessionContext | null = getSessionContext(
           messageResult.value.project?.uuid!
         );
-        if (!context) {
-          log.info(`Workspace not in memory, querying docker api`);
-          let workspaceResult = await dockerService.getWorkspace(
-            messageResult.value.project?.uuid!
-          );
-          if (!workspaceResult.ok) {
-            log.info(`Workspace not found in docker, restoring from s3`);
-            await workspaceManager.restoreWorkspace(
-              messageResult.value.project?.uuid!
-            );
-            workspaceResult = await dockerService.getWorkspace(
-              messageResult.value.project?.uuid!
-            );
-          }
-          if (!workspaceResult.ok) {
-            log.error(workspaceResult.error, "Error when getting workspace");
-            return c.json({ error: workspaceResult.error }, 500);
-          }
-          context = {
-            projectId: messageResult.value.project?.uuid!,
-            workspaceInfo: workspaceResult.value,
-          };
-        }
-        const aiStream = await sessionContext.run(context, async () => {
-          const result = streamText({
-            model: registery.languageModel(
-              "openRouter:google/gemini-2.5-flash"
-            ),
-            system: `You are a helpful coding agent with access to a Docker workspace. You can execute terminal commands, read/write files, and edit code. Your goal is to help users build applications, primarily using Vite and modern web technologies. Wrok step by step and use tools as needed to acomplish the users needs.`,
-            tools: {
-              terminal,
-              read,
-              write,
-              edit,
-              describe,
-              fin,
-            },
-            messages: [
-              ...messages,
-              { role: "user", content: prompt } as UserModelMessage,
-            ],
-            stopWhen: stepCountIs(50),
-          });
-          return result.toUIMessageStreamResponse({
-            onFinish: async ({ messages, responseMessage }) => {
-              const userMessage = {
-                chatId: messageResult.value.chat.id,
-                role: "user",
-                messageUuid: uuidv4(),
-                parts: [{ type: "text", text: prompt }],
-                attachments: [],
-                createdAt: new Date(),
-              };
-              await dbService.insertMessage(
-                messageResult.value.chat.id,
-                userMessage
-              );
 
-              const messageToSave = {
-                chatId: messageResult.value.chat.id,
-                messageUuid: uuidv4(),
-                role: responseMessage.role,
-                parts: responseMessage.parts,
-                attachments: [], // do attachments need to be different from parts?
-                createdAt: new Date(),
-              };
-              await dbService.insertMessage(
-                messageResult.value.chat.id,
-                messageToSave
-              );
-            },
-          });
-        });
-        return aiStream;
+        const aiStrema = await sessionContext.run(
+          context || {
+            projectId: messageResult.value.project?.uuid!,
+            workspaceInfo: null as any, // Will be set once workspace is ready
+          },
+          async () => {
+            const test = createUIMessageStream<ChatMessage>({
+              execute: async ({ writer: dataStream }) => {
+                // If no context, we need to fetch/restore workspace
+                if (!context) {
+                  dataStream.write({
+                    type: "data-workspace",
+                    data: {
+                      status: "loading",
+                      message: "Checking workspace status",
+                    },
+                    transient: true,
+                  });
+
+                  log.info(`Workspace not in memory, querying docker api`);
+                  let workspaceResult = await dockerService.getWorkspace(
+                    messageResult.value.project?.uuid!
+                  );
+
+                  if (!workspaceResult.ok) {
+                    dataStream.write({
+                      type: "data-workspace",
+                      data: {
+                        status: "loading",
+                        message: "Restoring workspace",
+                      },
+                      transient: true,
+                    });
+
+                    log.info(
+                      `Workspace not found in docker, restoring from s3`
+                    );
+                    await workspaceManager.restoreWorkspace(
+                      messageResult.value.project?.uuid!
+                    );
+
+                    workspaceResult = await dockerService.getWorkspace(
+                      messageResult.value.project?.uuid!
+                    );
+                  }
+
+                  if (!workspaceResult.ok) {
+                    log.error(
+                      workspaceResult.error,
+                      "Error when getting workspace"
+                    );
+                    dataStream.write({
+                      type: "data-workspace",
+                      data: {
+                        status: "error",
+                        message: "Failed to restore workspace",
+                      },
+                      transient: true,
+                    });
+                    throw new Error(workspaceResult.error.message);
+                  }
+
+                  context = {
+                    projectId: messageResult.value.project?.uuid!,
+                    workspaceInfo: workspaceResult.value,
+                  };
+
+                  setSessionContext(
+                    messageResult.value.project?.uuid!,
+                    context
+                  );
+
+                  dataStream.write({
+                    type: "data-workspace",
+                    data: {
+                      status: "ready",
+                      message: "Workspace ready",
+                    },
+                    transient: true,
+                  });
+                } else {
+                  dataStream.write({
+                    type: "data-workspace",
+                    data: {
+                      status: "ready",
+                      message: "Workspace active",
+                    },
+                    transient: true,
+                  });
+                }
+
+                const result = streamText({
+                  model: registery.languageModel(
+                    `${modelProvider}:${modeName}`
+                  ),
+                  system: readFileSync(
+                    new URL("../prompts/system.txt", import.meta.url),
+                    "utf-8"
+                  ),
+                  messages: [
+                    ...messages,
+                    {
+                      role: "user",
+                      content: message.parts,
+                    } as UserModelMessage,
+                  ],
+                  tools: {
+                    terminal: terminalTool({ dataStream }),
+                    write: createWrite({ dataStream }),
+                    read,
+                    edit,
+                    describe,
+                    fin,
+                  },
+                });
+                dataStream.merge(result.toUIMessageStream());
+              },
+              onFinish: async (event) => {
+                if (event.messages && event.responseMessage) {
+                  const userMessage = {
+                    chatId: messageResult.value.chat.id,
+                    role: message.role,
+                    parts: message.parts,
+                    attachments: [],
+                    messageUuid: uuidv4(),
+                    createdAt: new Date(),
+                  };
+                  const resultMessage = {
+                    chatId: messageResult.value.chat.id,
+                    messageUuid: uuidv4(),
+                    role: event.responseMessage.role,
+                    parts: event.responseMessage.parts,
+                    attachments: [],
+                    createdAt: new Date(),
+                  };
+                  await dbService.insertMessage(
+                    messageResult.value.chat.id,
+                    userMessage
+                  );
+                  await dbService.insertMessage(
+                    messageResult.value.chat.id,
+                    resultMessage
+                  );
+                }
+              },
+            });
+
+            return createUIMessageStreamResponse({ stream: test });
+          }
+        );
+        return aiStrema;
       } catch (error) {
         log.error(error, "Error when running session context");
         return c.json({ error: "Internal server error" }, 500);
       }
     }
+    // const aiStream = await sessionContext.run(context, async () => {
+    //   const result = streamText({
+    //     model: registery.languageModel(`${modelProvider}:${modeName}`),
+    //     system: `You are a helpful coding agent with access to a Docker workspace. You can execute terminal commands, read/write files, and edit code. Your goal is to help users build applications, primarily using Vite and modern web technologies. Wrok step by step and use tools as needed to acomplish the users needs.`,
+    //     tools: {
+    //       // terminal,
+    //       read,
+    //       // write,
+    //       edit,
+    //       describe,
+    //       fin,
+    //     },
+    //     messages: [
+    //       ...messages,
+    //       { role: "user", content: message.parts } as UserModelMessage,
+    //     ],
+    //     stopWhen: stepCountIs(50),
+    //   });
+    //   return result.toUIMessageStreamResponse({
+    //     onFinish: async ({ messages, responseMessage }) => {
+    //       const userMessage = {
+    //         chatId: messageResult.value.chat.id,
+    //         role: "user",
+    //         messageUuid: uuidv4(),
+    //         parts: [{ type: "text", text: prompt }],
+    //         attachments: [],
+    //         createdAt: new Date(),
+    //       };
+    //       await dbService.insertMessage(
+    //         messageResult.value.chat.id,
+    //         userMessage
+    //       );
+
+    //       const messageToSave = {
+    //         chatId: messageResult.value.chat.id,
+    //         messageUuid: uuidv4(),
+    //         role: responseMessage.role,
+    //         parts: responseMessage.parts,
+    //         //TODO: Figure out how to handle attachments
+    //         attachments: [], // do attachments need to be different from parts?
+    //         createdAt: new Date(),
+    //       };
+    //       //NOTE: Right now the entire messages is over written and saved
+    //       await dbService.insertMessage(
+    //         messageResult.value.chat.id,
+    //         messageToSave
+    //       );
+    //     },
+    //   });
+    // });
+    // return aiStream;
+    //   } catch (error) {
+    //     log.error(error, "Error when running session context");
+    //     return c.json({ error: "Internal server error" }, 500);
+    //   }
+    // }
+  )
+  .get(
+    "/ws/:chatId",
+    upgradeWebSocket(async (c) => {
+      const chatId = c.req.param("chatId");
+      const userId = Number(c.req.query("userId"));
+      console.log("attempting to connect to ws ", userId, chatId);
+      let returnMsg: WsServerMessages;
+      const chatResult = await dbService.getChatInfo(userId, chatId);
+      if (!chatResult.ok) {
+        throw new Error(chatResult.error.message);
+      }
+      const containerId = chatResult.value.project?.uuid!;
+      console.log("containerId", containerId);
+      const stream = await dockerService.setupFileWatcher(containerId);
+      console.log(chatId, userId);
+
+      return {
+        async onOpen(event, ws) {
+          stream.on("data", async (chunk) => {
+            const output = chunk.toString().trim();
+            const [event, filePath] = output.split(" ", 2);
+
+            if ((event === "change" || event === "add") && filePath) {
+              const relativePath = filePath.replace("/workspace/", "");
+
+              try {
+                const content = await dockerService.executeCommand(
+                  containerId,
+                  ["cat", relativePath]
+                );
+                console.log("content", content);
+
+                ws.send(
+                  JSON.stringify({
+                    type: "file_changed",
+                    path: relativePath,
+                    content: content,
+                  })
+                );
+              } catch (error) {
+                console.error("Error reading file:", error);
+              }
+            }
+          });
+          const files = await dockerService.listFiles(containerId);
+          if (!files.ok) {
+            console.log("error", files.error);
+            ws.send(
+              JSON.stringify({ type: "error", message: "Failed to list files" })
+            );
+            return;
+          }
+          console.log("files", files.value);
+
+          ws.send(
+            JSON.stringify({ type: "initial_files", files: files.value })
+          );
+        },
+        async onMessage(event, ws) {
+          const msg: WsClientMessages = JSON.parse(event.data.toString());
+          console.log("Received WebSocket message:", msg);
+
+          switch (msg.type) {
+            case "terminal_input":
+              break;
+            case "list_files":
+              const files = await dockerService.listFiles(containerId);
+              if (!files.ok) {
+                ws.send(
+                  JSON.stringify({
+                    type: "error",
+                    message: "Failed to list files",
+                  })
+                );
+                return;
+              }
+              ws.send(
+                JSON.stringify({ type: "initial_files", files: files.value })
+              );
+              break;
+            case "read_file":
+              console.log("Reading file:", msg.path);
+              const file = await dockerService.executeCommand(containerId, [
+                "cat",
+                msg.path,
+              ]);
+              if (!file.ok) {
+                console.error("Failed to read file:", msg.path, file.error);
+                ws.send(
+                  JSON.stringify({
+                    type: "error",
+                    message: "Failed to read file",
+                  })
+                );
+                return;
+              }
+              const fileContentMsg = {
+                type: "file_content",
+                path: msg.path,
+                content: file.value.stdout,
+              };
+              console.log(
+                "Sending file content for:",
+                msg.path,
+                "Content length:",
+                file.value.stdout.length
+              );
+              ws.send(JSON.stringify(fileContentMsg));
+              break;
+            case "write_file":
+              const { content, path } = msg;
+              const writeResult = await dockerService.executeCommand(
+                containerId,
+                ["echo", content, ">", path]
+              );
+              if (!writeResult.ok) {
+                ws.send(
+                  JSON.stringify({
+                    type: "error",
+                    message: "Failed to write file",
+                  })
+                );
+                return;
+              }
+              const writeMsg = {
+                type: "file_written",
+                path,
+                content,
+              };
+              ws.send(JSON.stringify(writeMsg));
+              break;
+          }
+        },
+      };
+    })
   );
 
-export default app;
+export { app, injectWebSocket };

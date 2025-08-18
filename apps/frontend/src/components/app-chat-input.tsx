@@ -1,3 +1,4 @@
+"use client";
 import config from "@/config";
 import { useSession } from "@/lib/auth-client";
 import { useState } from "react";
@@ -16,50 +17,110 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { GlobeIcon, MicIcon } from "lucide-react";
-import { useChat } from "@ai-sdk/react";
-import { useBackendChat } from "@/hooks/user-backend-chat";
+import { UIMessage, useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 
 const models = [
   { id: "openRouter:google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
   { id: "generic test", name: "generic testing" },
 ];
 
-export const AppChatInput = () => {
+interface AppChatInputProps {
+  chatId?: string;
+  initialMessages?: UIMessage[];
+  isCreateMode?: boolean;
+  onChatCreated?: (chatId: string) => void; // Callback when chat is created
+}
+
+export const AppChatInput = ({
+  chatId,
+  initialMessages,
+  isCreateMode = false,
+  onChatCreated,
+}: AppChatInputProps) => {
   const { data: session, isPending } = useSession();
   const [text, setText] = useState<string>("");
   const [model, setModel] = useState<string>(models[0].id);
+  const [currentChatId, setCurrentChatId] = useState<string | undefined>(
+    chatId
+  );
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
 
+  const { messages, status, sendMessage } = useChat({
+    transport: new DefaultChatTransport({
+      api: `api/chat`,
+      prepareSendMessagesRequest({ messages, messageId, body }) {
+        return {
+          body: {
+            chatId: currentChatId,
+            messageId: messageId,
+            userId: Number(session?.user.id),
+            message: messages.at(-1),
+            modelProvider: model.split(":")[0],
+            model: model.split(":")[1],
+          },
+        };
+      },
+    }),
+  });
+
+  const createNewChat = async (): Promise<string | null> => {
+    try {
+      const newChatId = crypto.randomUUID();
+      const response = await fetch(`/api/chat/new`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: newChatId,
+        }),
+      });
+
+      if (response.ok) {
+        return newChatId;
+      } else {
+        toast.error("Failed to create chat");
+        return null;
+      }
+    } catch (error) {
+      console.error("Error when creating chat", error);
+      toast.error("Failed to create chat session");
+      return null;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!session?.user.id) {
-      toast.error("Please login to send a message");
-      return;
-    }
 
-    // TODO: Add model selector here
-    const response = await fetch(`${config.backend.url}/chat`, {
-      method: "POST",
-      body: JSON.stringify({
-        userId: session?.user.id,
-        prompt: text,
-        model: model,
-      }),
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+    if (!text.trim()) return;
 
-    if (!response.ok) {
-      toast.error("Failed to send message");
+    if (isCreateMode && !currentChatId) {
+      setIsCreatingChat(true);
+
+      const newChatId = await createNewChat();
+
+      if (newChatId) {
+        setCurrentChatId(newChatId);
+        onChatCreated?.(newChatId);
+      } else {
+        setIsCreatingChat(false);
+        return;
+      }
+
+      setIsCreatingChat(false);
     }
+    sendMessage({ text: text });
     setText("");
   };
+
   return (
     <PromptInput onSubmit={handleSubmit} className="mt-4">
       <PromptInputTextarea
         onChange={(e) => setText(e.target.value)}
         value={text}
+        placeholder="Type your message..."
+        className="min-h-[48px] resize-none"
       />
       <PromptInputToolbar>
         <PromptInputTools>
@@ -88,7 +149,10 @@ export const AppChatInput = () => {
             </PromptInputModelSelectContent>
           </PromptInputModelSelect>
         </PromptInputTools>
-        <PromptInputSubmit disabled={!text} status={status} />
+        <PromptInputSubmit
+          disabled={!text.trim() || isCreatingChat}
+          status={isCreatingChat ? "streaming" : status}
+        />
       </PromptInputToolbar>
     </PromptInput>
   );

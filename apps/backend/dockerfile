@@ -22,13 +22,13 @@ RUN npm install -g \
     eslint \
     prettier \
     nodemon \
-    vite@latest 
+    vite@latest \
+    chokidar-cli
 # Install language servers for coding assistance
 RUN npm install -g \
     typescript-language-server \
     vscode-langservers-extracted \
     @vue/language-server
-
 
 
 # Create a non-root user for security
