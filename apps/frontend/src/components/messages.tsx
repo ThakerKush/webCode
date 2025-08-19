@@ -8,11 +8,13 @@ import {
   ToolOutput,
 } from "@/components/ai-elements/tool";
 
+import { Message } from "./message-simple";
+
 export function Messages({ messages }: { messages: any[] }) {
   return (
     <div className="flex flex-col gap-4 p-4">
       {messages.map((m) => (
-        <MessageBubble key={m.id} message={m} />
+        <Message key={m.id} chatId="" message={m} isLoading={false} />
       ))}
     </div>
   );

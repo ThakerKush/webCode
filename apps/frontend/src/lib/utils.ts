@@ -35,3 +35,6 @@ export async function fetchWithErrorHandlers(
     throw error;
   }
 }
+export function sanitizeText(text: string) {
+  return text.replace("<has_function_call>", "");
+}

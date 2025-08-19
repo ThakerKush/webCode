@@ -30,6 +30,7 @@ interface AppChatInputProps {
   initialMessages?: UIMessage[];
   isCreateMode?: boolean;
   onChatCreated?: (chatId: string) => void; // Callback when chat is created
+  onMessageSent?: (message: string) => void; // Callback when message is sent
 }
 
 export const AppChatInput = ({
@@ -37,6 +38,7 @@ export const AppChatInput = ({
   initialMessages,
   isCreateMode = false,
   onChatCreated,
+  onMessageSent,
 }: AppChatInputProps) => {
   const { data: session, isPending } = useSession();
   const [text, setText] = useState<string>("");
@@ -46,7 +48,8 @@ export const AppChatInput = ({
   );
   const [isCreatingChat, setIsCreatingChat] = useState(false);
 
-  const { messages, status, sendMessage } = useChat({
+  // Only use this useChat hook for create mode, otherwise rely on parent's chat handling
+  const { sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
       api: `api/chat`,
       prepareSendMessagesRequest({ messages, messageId, body }) {
@@ -110,12 +113,26 @@ export const AppChatInput = ({
 
       setIsCreatingChat(false);
     }
-    sendMessage({ text: text });
+
+    // If in create mode or no parent message handler, use our own sendMessage
+    if (isCreateMode || !onMessageSent) {
+      sendMessage({ text: text });
+    } else {
+      // Let parent handle the message sending
+      onMessageSent(text);
+    }
+
     setText("");
   };
 
+  const inputStatus = isCreateMode
+    ? isCreatingChat
+      ? "streaming"
+      : status
+    : status;
+
   return (
-    <PromptInput onSubmit={handleSubmit} className="mt-4">
+    <PromptInput onSubmit={handleSubmit}>
       <PromptInputTextarea
         onChange={(e) => setText(e.target.value)}
         value={text}
@@ -151,7 +168,7 @@ export const AppChatInput = ({
         </PromptInputTools>
         <PromptInputSubmit
           disabled={!text.trim() || isCreatingChat}
-          status={isCreatingChat ? "streaming" : status}
+          status={inputStatus}
         />
       </PromptInputToolbar>
     </PromptInput>

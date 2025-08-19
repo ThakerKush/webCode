@@ -17,7 +17,10 @@ export type ChatTools = {
 };
 
 export type CustomUIDataTypes = {
-  codeDelta: string;
+  codeDelta: {
+    path: string;
+    content: string;
+  };
   textDelta: string;
   writeDelta: string;
   terminalDelta: string;

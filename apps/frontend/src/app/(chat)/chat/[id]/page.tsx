@@ -1,6 +1,6 @@
 "use client";
-import DockerIDE from "@/components/ide";
-import config from "@/config";
+import { Chat } from "@/components/chat";
+import { DataStreamProvider } from "@/components/data-stream-provider";
 import { useSession } from "@/lib/auth-client";
 import React from "react";
 
@@ -12,16 +12,22 @@ interface PageProps {
 
 export default function ChatPage({ params }: PageProps) {
   const { data: session, isPending } = useSession();
+
   if (isPending) {
     return <div>Loading...</div>;
   }
-  console.log("id", params.id);
-  console.log("userId", session?.user.id);
+
+  if (!session?.user) {
+    return <div>Please log in to continue</div>;
+  }
+
   return (
-    <DockerIDE
-      containerId={params.id}
-      wsUrl={config.backend.wsUrl}
-      userId={Number(session?.user.id)}
-    />
+    <DataStreamProvider>
+      <div className="h-[calc(100vh-3rem)]">
+        {" "}
+        {/* Account for sidebar trigger */}
+        <Chat id={params.id} initialMessages={[]} model="openai:gpt-4o-mini" />
+      </div>
+    </DataStreamProvider>
   );
 }

@@ -37,6 +37,7 @@ import { readFileSync } from "fs";
 import { ChatMessage, WsClientMessages, WsServerMessages } from "./types.js";
 import { join } from "path";
 import { Message } from "@repo/db/schema";
+import { authMiddleware } from "../middleware/auth.js";
 
 const app = new Hono();
 const log = logger.child({ service: "backend" });
@@ -119,15 +120,53 @@ app
         );
         return c.json({ error: chat.error }, 500);
       }
+
+      return c.json({ success: true, chatId });
     }
   )
+  .get("/chat/:chatId/messages", authMiddleware, async (c) => {
+    try {
+      const chatId = c.req.param("chatId");
+      const user = c.get("user");
+
+      log.info({ chatId, userId: user.id }, "Fetching messages for chat");
+
+      const chatInfo = await dbService.getChatInfo(user.id, chatId);
+      if (!chatInfo.ok) {
+        log.error(
+          { chatId, userId: user.id, error: chatInfo.error },
+          "Failed to get chat info"
+        );
+        return c.json({ error: "Chat not found" }, 404);
+      }
+
+      // Transform messages to the format expected by the frontend
+      const transformedMessages = chatInfo.value.messages.map((message) => ({
+        id: message.messageUuid,
+        role: message.role,
+        parts: message.parts,
+        attachments: message.attachments,
+        createdAt: message.createdAt,
+      }));
+
+      return c.json({
+        messages: transformedMessages,
+        chat: chatInfo.value.chat,
+        project: chatInfo.value.project,
+      });
+    } catch (error) {
+      log.error(error, "Error fetching chat messages");
+      return c.json({ error: "Internal server error" }, 500);
+    }
+  })
   .post(
     "/chat",
     //TODO: add attachment supoprt here
     zValidator(
       "json",
       z.object({
-        id: z.string().uuid(),
+        chatId: z.string().uuid(),
+        messageId: z.string().uuid(),
         userId: z.number(),
         message: z.object({
           id: z.string().uuid(),
@@ -135,18 +174,18 @@ app
           parts: z.array(partSchema),
         }),
         modelProvider: z.string(),
-        modeName: z.string(),
+        model: z.string(),
       })
     ),
     async (c) => {
       try {
-        const { userId, id, message, modelProvider, modeName } =
+        const { userId, chatId, messageId, message, modelProvider, model } =
           c.req.valid("json");
 
-        const messageResult = await dbService.getChatInfo(userId, id);
+        const messageResult = await dbService.getChatInfo(userId, chatId);
         if (!messageResult.ok) {
           log.error(
-            { route: "/chat/:id", error: messageResult.error },
+            { route: "/chat", error: messageResult.error },
             "Error when getting chat info"
           );
           return c.json({ error: messageResult.error }, 500);
@@ -248,9 +287,7 @@ app
                 }
 
                 const result = streamText({
-                  model: registery.languageModel(
-                    `${modelProvider}:${modeName}`
-                  ),
+                  model: registery.languageModel(`${modelProvider}:${model}`),
                   system: readFileSync(
                     new URL("../prompts/system.txt", import.meta.url),
                     "utf-8"
@@ -280,7 +317,7 @@ app
                     role: message.role,
                     parts: message.parts,
                     attachments: [],
-                    messageUuid: uuidv4(),
+                    messageUuid: messageId,
                     createdAt: new Date(),
                   };
                   const resultMessage = {
@@ -312,62 +349,6 @@ app
         return c.json({ error: "Internal server error" }, 500);
       }
     }
-    // const aiStream = await sessionContext.run(context, async () => {
-    //   const result = streamText({
-    //     model: registery.languageModel(`${modelProvider}:${modeName}`),
-    //     system: `You are a helpful coding agent with access to a Docker workspace. You can execute terminal commands, read/write files, and edit code. Your goal is to help users build applications, primarily using Vite and modern web technologies. Wrok step by step and use tools as needed to acomplish the users needs.`,
-    //     tools: {
-    //       // terminal,
-    //       read,
-    //       // write,
-    //       edit,
-    //       describe,
-    //       fin,
-    //     },
-    //     messages: [
-    //       ...messages,
-    //       { role: "user", content: message.parts } as UserModelMessage,
-    //     ],
-    //     stopWhen: stepCountIs(50),
-    //   });
-    //   return result.toUIMessageStreamResponse({
-    //     onFinish: async ({ messages, responseMessage }) => {
-    //       const userMessage = {
-    //         chatId: messageResult.value.chat.id,
-    //         role: "user",
-    //         messageUuid: uuidv4(),
-    //         parts: [{ type: "text", text: prompt }],
-    //         attachments: [],
-    //         createdAt: new Date(),
-    //       };
-    //       await dbService.insertMessage(
-    //         messageResult.value.chat.id,
-    //         userMessage
-    //       );
-
-    //       const messageToSave = {
-    //         chatId: messageResult.value.chat.id,
-    //         messageUuid: uuidv4(),
-    //         role: responseMessage.role,
-    //         parts: responseMessage.parts,
-    //         //TODO: Figure out how to handle attachments
-    //         attachments: [], // do attachments need to be different from parts?
-    //         createdAt: new Date(),
-    //       };
-    //       //NOTE: Right now the entire messages is over written and saved
-    //       await dbService.insertMessage(
-    //         messageResult.value.chat.id,
-    //         messageToSave
-    //       );
-    //     },
-    //   });
-    // });
-    // return aiStream;
-    //   } catch (error) {
-    //     log.error(error, "Error when running session context");
-    //     return c.json({ error: "Internal server error" }, 500);
-    //   }
-    // }
   )
   .get(
     "/ws/:chatId",

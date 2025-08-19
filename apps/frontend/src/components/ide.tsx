@@ -150,7 +150,7 @@ const buildFileTree = (
   return tree;
 };
 
-// Helper function to get file icon based on extension
+// Helper function to get file icon based on extension (toned down colors)
 const getFileIcon = (filename: string): React.ReactNode => {
   const ext = filename.split(".").pop()?.toLowerCase();
   const baseClasses = "w-4 h-4";
@@ -158,29 +158,29 @@ const getFileIcon = (filename: string): React.ReactNode => {
   switch (ext) {
     case "js":
     case "jsx":
-      return <FileCode className={`${baseClasses} text-yellow-500`} />;
+      return <FileCode className={`${baseClasses} text-muted-foreground`} />;
     case "ts":
     case "tsx":
-      return <FileCode className={`${baseClasses} text-blue-500`} />;
+      return <FileCode className={`${baseClasses} text-muted-foreground`} />;
     case "html":
     case "htm":
-      return <FileCode className={`${baseClasses} text-orange-500`} />;
+      return <FileCode className={`${baseClasses} text-muted-foreground`} />;
     case "css":
     case "scss":
     case "sass":
-      return <FileCode className={`${baseClasses} text-blue-400`} />;
+      return <FileCode className={`${baseClasses} text-muted-foreground`} />;
     case "py":
-      return <FileCode className={`${baseClasses} text-green-500`} />;
+      return <FileCode className={`${baseClasses} text-muted-foreground`} />;
     case "json":
-      return <Settings className={`${baseClasses} text-yellow-600`} />;
+      return <Settings className={`${baseClasses} text-muted-foreground`} />;
     case "md":
-      return <FileText className={`${baseClasses} text-gray-400`} />;
+      return <FileText className={`${baseClasses} text-muted-foreground`} />;
     case "png":
     case "jpg":
     case "jpeg":
     case "gif":
     case "svg":
-      return <FileImage className={`${baseClasses} text-purple-500`} />;
+      return <FileImage className={`${baseClasses} text-muted-foreground`} />;
     default:
       return <File className={`${baseClasses} text-muted-foreground`} />;
   }
@@ -196,17 +196,25 @@ const FileTreeNode: React.FC<{
 }> = ({ node, level, onFileClick, onToggleDirectory, currentFile }) => {
   const indent = level * 16;
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (node.isDirectory) {
+      onToggleDirectory(node.path);
+    } else {
+      onFileClick(node.path);
+    }
+  };
+
   return (
     <div>
       <div
-        onClick={() =>
-          node.isDirectory
-            ? onToggleDirectory(node.path)
-            : onFileClick(node.path)
-        }
+        onClick={handleClick}
+        onMouseDown={(e) => e.preventDefault()} // Prevent text selection
         className={`
-          flex items-center py-1 px-2 text-sm cursor-pointer hover:bg-muted/50 transition-colors rounded-sm mx-1
-          ${currentFile === node.path ? "bg-primary text-primary-foreground" : "text-foreground"}
+          flex items-center py-1 px-2 text-sm cursor-pointer hover:bg-muted/50 transition-colors rounded-sm mx-1 select-none
+          ${currentFile === node.path ? "bg-primary/20 text-foreground" : "text-muted-foreground hover:text-foreground"}
         `}
         style={{ paddingLeft: `${8 + indent}px` }}
       >
@@ -222,9 +230,9 @@ const FileTreeNode: React.FC<{
         <span className="mr-2">
           {node.isDirectory ? (
             node.isOpen ? (
-              <FolderOpen className="w-4 h-4 text-blue-500" />
+              <FolderOpen className="w-4 h-4 text-muted-foreground" />
             ) : (
-              <Folder className="w-4 h-4 text-blue-500" />
+              <Folder className="w-4 h-4 text-muted-foreground" />
             )
           ) : (
             getFileIcon(node.name)

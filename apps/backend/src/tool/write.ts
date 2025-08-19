@@ -28,6 +28,13 @@ export const createWrite = ({ dataStream }: WriteToolProps) =>
         workspace.workspaceInfo.containerId,
         ["bash", "-c", `cat > ${path} << 'EOF'\n${content}\nEOF`]
       );
+      dataStream.write({
+        type: "data-codeDelta",
+        data: {
+          path: path,
+          content: content,
+        },
+      });
       if (result.ok) {
         logger.info(
           { child: "write tool" },

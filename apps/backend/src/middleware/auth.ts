@@ -18,8 +18,7 @@ export const authMiddleware = createMiddleware<{
   };
 }>(async (c, next) => {
   // Get session token from cookie (better-auth uses 'session' cookie by default)
-  const sessionToken = getCookie(c, "session");
-
+  const sessionToken = getCookie(c, "session_token")?.split(".")[0];
   if (!sessionToken) {
     return c.json({ error: "Unauthorized" }, 401);
   }
