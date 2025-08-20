@@ -3,6 +3,13 @@ import { cn } from "@/lib/utils";
 import { Markdown } from "./markdown";
 import { MessageActions } from "./message-actions";
 import type { ChatMessage } from "codeAgent/types/chat";
+import {
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
 
 interface MessageProps {
   chatId: string;
@@ -36,24 +43,69 @@ function PureMessage({ chatId, message, isLoading }: MessageProps) {
                 );
               }
 
-              // Handle tool calls
+              // Handle tool calls using the proper Tool component
               if (part.type?.startsWith("tool-")) {
+                const toolName = part.type.replace("tool-", "");
+                const toolPart = part as any; // Type assertion for tool parts
+
                 return (
-                  <div
+                  <Tool
                     key={index}
-                    className="rounded-lg border bg-muted/50 p-4"
+                    defaultOpen={toolPart.state !== "output-available"}
                   >
-                    <div className="font-medium text-sm mb-2">
-                      Tool: {part.type.replace("tool-", "")}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {JSON.stringify(part, null, 2)}
-                    </div>
-                  </div>
+                    <ToolHeader
+                      type={`tool-${toolName}` as `tool-${string}`}
+                      state={toolPart.state || "input-available"}
+                    />
+                    <ToolContent>
+                      {toolPart.input && <ToolInput input={toolPart.input} />}
+                      <ToolOutput
+                        output={renderToolOutput(toolPart)}
+                        errorText={toolPart.errorText}
+                      />
+                    </ToolContent>
+                  </Tool>
                 );
               }
 
-              // Handle data streams
+              // Handle dynamic tools
+              if (part.type === "dynamic-tool") {
+                const toolPart = part as any;
+
+                return (
+                  <Tool
+                    key={index}
+                    defaultOpen={toolPart.state !== "output-available"}
+                  >
+                    <ToolHeader
+                      type={toolPart.toolName || "tool"}
+                      state={toolPart.state || "input-available"}
+                    />
+                    <ToolContent>
+                      {toolPart.input && <ToolInput input={toolPart.input} />}
+                      <ToolOutput
+                        output={renderToolOutput(toolPart)}
+                        errorText={toolPart.errorText}
+                      />
+                    </ToolContent>
+                  </Tool>
+                );
+              }
+
+              // Skip data streams since they'll be handled by the IDE
+              if (part.type?.startsWith("data-codeDelta")) {
+                return null; // Don't render codeDelta in the message stream
+              }
+
+              // Skip step-start messages - these are internal workflow messages
+              if (
+                part.type === "step-start" ||
+                (part as any).type === "step-start"
+              ) {
+                return null;
+              }
+
+              // Handle other data streams
               if (part.type?.startsWith("data-")) {
                 return (
                   <div
@@ -64,21 +116,15 @@ function PureMessage({ chatId, message, isLoading }: MessageProps) {
                       Data: {part.type.replace("data-", "")}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {part.type === "data-codeDelta" && (part as any).data ? (
-                        <div>
-                          <div className="font-medium">
-                            File: {(part as any).data.path}
-                          </div>
-                          <pre className="mt-2 whitespace-pre-wrap text-xs">
-                            {(part as any).data.content}
-                          </pre>
-                        </div>
-                      ) : (
-                        JSON.stringify((part as any).data || part, null, 2)
-                      )}
+                      {JSON.stringify((part as any).data || part, null, 2)}
                     </div>
                   </div>
                 );
+              }
+
+              // Fallback for unknown part types - but filter out step-start here too
+              if ((part as any).type === "step-start") {
+                return null;
               }
 
               return (
@@ -105,6 +151,19 @@ function PureMessage({ chatId, message, isLoading }: MessageProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+// Helper function to render tool output
+function renderToolOutput(toolPart: any) {
+  if (toolPart.output == null) return null;
+  if (typeof toolPart.output === "string") {
+    return <div className="whitespace-pre-wrap">{toolPart.output}</div>;
+  }
+  return (
+    <pre className="whitespace-pre-wrap">
+      {JSON.stringify(toolPart.output, null, 2)}
+    </pre>
   );
 }
 

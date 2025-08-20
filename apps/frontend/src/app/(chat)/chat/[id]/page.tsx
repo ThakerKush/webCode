@@ -17,16 +17,16 @@ export default function ChatPage({ params }: PageProps) {
     return <div>Loading...</div>;
   }
 
-  if (!session?.user) {
-    return <div>Please log in to continue</div>;
-  }
-
   return (
     <DataStreamProvider>
       <div className="h-[calc(100vh-3rem)]">
         {" "}
         {/* Account for sidebar trigger */}
-        <Chat id={params.id} initialMessages={[]} model="openai:gpt-4o-mini" />
+        <Chat
+          id={params.id}
+          initialMessages={[]}
+          model="openai:gpt-4o-mini"
+        />
       </div>
     </DataStreamProvider>
   );

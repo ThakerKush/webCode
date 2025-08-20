@@ -48,7 +48,7 @@ export const AppChatInput = ({
   );
   const [isCreatingChat, setIsCreatingChat] = useState(false);
 
-  // Only use this useChat hook for create mode, otherwise rely on parent's chat handling
+  // Only use this useChat hook for create mode
   const { sendMessage, status } = useChat({
     transport: new DefaultChatTransport({
       api: `api/chat`,
@@ -114,12 +114,15 @@ export const AppChatInput = ({
       setIsCreatingChat(false);
     }
 
-    // If in create mode or no parent message handler, use our own sendMessage
-    if (isCreateMode || !onMessageSent) {
-      sendMessage({ text: text });
-    } else {
-      // Let parent handle the message sending
+    // Always use the parent's message handler if available (non-create mode)
+    if (onMessageSent && !isCreateMode) {
       onMessageSent(text);
+    } else if (isCreateMode) {
+      // For create mode, use our own sendMessage
+      sendMessage({
+        role: "user",
+        parts: [{ type: "text", text }],
+      });
     }
 
     setText("");
@@ -129,7 +132,7 @@ export const AppChatInput = ({
     ? isCreatingChat
       ? "streaming"
       : status
-    : status;
+    : undefined; // For non-create mode, we don't show streaming status from this component
 
   return (
     <PromptInput onSubmit={handleSubmit}>

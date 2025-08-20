@@ -32,7 +32,6 @@ export async function GET(
         headers,
       }
     );
-    console.log(`${config.backend.url}/chat/${chatId}/messages`);
 
     if (!response.ok) {
       if (response.status === 404) {
