@@ -17,7 +17,9 @@ Coding agent with workspace orchestration.
 
 # Sample agent output:
 
+Prompt: Make a simple todo app in react, add a calender that has a due date.
 ![Agent Demo](docs/agentDemo.png)
+![Agent Demo](docs/agentDemo2.png)
 
 # Roadmap:
 
